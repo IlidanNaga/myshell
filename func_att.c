@@ -14,6 +14,16 @@ size_t words_amount = 0;
 size_t buffer_size = 0;
 size_t pos = 0;
 
+void clear_rubbish(char ***arr) {
+    
+    int i;
+
+    for (i = 0; i < words_amount; i++)
+        free((*arr)[i]);
+
+    free((*arr));
+}
+
 char* reading() {
     
     char buff;
@@ -32,12 +42,11 @@ char* reading() {
     return buffer;
 }
 
-char** making_into_words() {
+char** making_into_words(char *buffer) {
     
     int i, flag = 0, len = 0;
     char **data = NULL;
-    
-    char *buffer = reading();
+    char *buffer2 = NULL;
     
     if (buffer_size == 0)
         return NULL;
@@ -45,7 +54,6 @@ char** making_into_words() {
     for (i = pos; i < buffer_size; i++) {
 
         if (buffer[i] == ';') {
-            pos = i+1;
             break;
         }
 
@@ -110,8 +118,12 @@ char** making_into_words() {
                 len = 0;
             }
         }
-
+    
+    pos = i + 1;
     }                                                 // i guess we just exit it... or no?
+
+    data = (char**) realloc(data, (words_amount+1) * sizeof(char*));
+    data[words_amount] = NULL;
 
     return data;
     
@@ -125,12 +137,10 @@ int checking_if_all() {
         return 0;
 } 
 
-void working_with_data() {
-    
-    char **data=making_into_words();
-    
-    data = (char**) realloc(data, (words_amount +1) *sizeof(char*));
-    data[words_amount] = NULL;
+int working_with_data(char **data) {  // array will be preparated - added last NULL line
+
+    int pid;
+    int res, *son;
     
     if ((pid=fork()) == 0) {
         
@@ -143,50 +153,35 @@ void working_with_data() {
     
     if (res == -1)
         printf("Program failed to open\n");
-        
-    words_amount = 0;
-    
+
+    return res;
 }
 
-void clear_rubbish(char ***arr) {
+void make_all_done() {
     
-    int i;
-
-    for (i = 0; i < words_amount; i++)
-        free((*arr)[i]);
-
-    free((*arr));
+    char **data = NULL;
+    char *buffer = reading();
+    
+    int res;
+    
+    while (checking_if_all()) {
+        
+        data = making_into_words(buffer);
+        
+        res = working_with_data(data);
+        
+        clear_rubbish(&data);
+        data = NULL;
+        
+    }
+        
+    free(buffer);
+    
 }
 
 int main () {
-
-    // i guess part upstairs just not useful anymore;
-
-    // words amount will count EXACT amount of words
-
-    // dark zone - everything under this is still in work process
-    // current state - we can run 1 process with it's parameters (finaly)
-
-    int pid;
-    int res, *son;
-
-    data = (char**) realloc(data, (words_amount + 1) * sizeof(char*));
-    data[words_amount] = NULL;
-
-    if ((pid=fork()) == 0) {                        // initialising child process
-
-        res = execvp(data[0],data);
-
-    } else {
-        res = wait(&pid);
-    }
-
-    if (res == -1)
-        printf ("Program failed to open\n");
-
-    // please, don't check with vallgrind
-
-    clear_rubbish(&data);
+    
+    make_all_done();
+    
     return 0;
-
 }
