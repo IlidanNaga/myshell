@@ -12,19 +12,20 @@ char **mshell_getwords(char *buffer, int *status);   // splitting buffer into th
 int mshell_execute(char **data, int *status);        // working with data we got in _getwords, must be splitted into xtra's
 
 int mshell_forks(char **data);          // working with data - fork way
-int mshell_background(char **data);     // working with data - background
+int mshell_background(char **data);     // working with data - background, equal to forks but without wait
 
 int mshell_cd(char **data);             // working with data - got cd
 int mshell_exit(char **data);           // working with data - got exit
+int mshell_help(char **data);           // printing all builtins i made
 int mshell_builtins_am();               // returning amount of builtin functions we realise
 
 
 char *builtin_str[] = {
-        "cd", "exit"
+        "cd", "exit","help"
 };
 
 int (*builtin_func[]) (char **) = {
-        &mshell_cd, &mshell_exit
+        &mshell_cd, &mshell_exit, &mshell_help
 };
 
 
@@ -175,10 +176,9 @@ int mshell_background(char **data) {
     } else if (pid < 0) {
         perror("mshell - fork");
     }
-        
+
     return 1;
 }
-
 int mshell_forks(char **data) {
 
     int pid, wpid;
@@ -222,6 +222,19 @@ int mshell_cd(char **data) {
 }
 int mshell_exit(char **data) {
     return 0;
+}
+int mshell_help(char **data) {
+
+    int i;
+
+    printf("Hello, these are all the builtins already realised\n");
+
+    for (i = 0; i < sizeof(builtin_str) / sizeof(char *); i++)
+        printf("%s  ", builtin_str[i]);
+
+    printf("\n");
+
+    return 1;
 }
 
 int mshell_execute(char **data, int *status) {
