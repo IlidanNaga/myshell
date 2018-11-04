@@ -8,8 +8,8 @@
 
 void mshell_init(void);                 // function which makes everything work
 char *mshell_getline(int *status);      // getting line until ; or EOF
-char **mshell_getwords(char *buffer);   // splitting buffer into the words, filling last part with NULL
-int mshell_execute(char **data);        // working with data we got in _getwords, must be splitted into xtra's
+char **mshell_getwords(char *buffer, int *status);   // splitting buffer into the words, filling last part with NULL
+int mshell_execute(char **data, int *status);        // working with data we got in _getwords, must be splitted into xtra's
 
 int mshell_forks(char **data);          // working with data - fork way
 int mshell_background(char **data);     // working with data - background
@@ -67,7 +67,7 @@ char* mshell_getline(int *status) {
     return buffer;
 }
 
-char** mshell_getwords(char *buffer) {
+char** mshell_getwords(char *buffer, int *status) {
 
     int i, flag = 0, len = 0;
     char **data = NULL;
@@ -154,8 +154,7 @@ char** mshell_getwords(char *buffer) {
 
     }
 
-    data = (char**) realloc(data, (words_amount+1) * sizeof(char*));
-    data[words_amount] = NULL;
+    status[2] = words_amount;
 
     return data;
 
@@ -163,6 +162,21 @@ char** mshell_getwords(char *buffer) {
 
 int mshell_background(char **data) {
 
+    int pid, wpid;
+    int stat;
+
+    if (pid = fork() == 0) {
+
+        if (execvp(data[0], data) == -1) {
+            perror("mshell - exec");
+        }
+
+        exit(EXIT_FAILURE);
+    } else if (pid < 0) {
+        perror("mshell - fork");
+    }
+        
+    return 1;
 }
 
 int mshell_forks(char **data) {
@@ -201,18 +215,34 @@ int mshell_cd(char **data) {
         perror("mshell: waiting arguments for cd\n");
     } else {
         if (chdir(data[1]) != 0)
-            perror("mshell - cd");
+            perror("mshell - cd\n");
     }
 
-    return 1;
+    return 0;
 }
 int mshell_exit(char **data) {
     return 0;
 }
 
-int mshell_execute(char **data) {
+int mshell_execute(char **data, int *status) {
 
     int i;
+    int words_amount = status[2];
+
+    for (i = 0; i < words_amount - 1; i++) {
+        if (strcmp(data[i], "&") == 0) {
+            printf("mshell - command composition\n");
+            return 1;
+        }
+    }
+
+    if (strcmp(data[words_amount - 1], "&") == 0) {
+        data[words_amount - 1] = NULL;
+        return mshell_background(data);
+    } else {
+        data = (char **) realloc(data, words_amount * sizeof(char *));
+        data[words_amount] = NULL;
+    }
 
     if (data[0] == NULL) {
         return 1;
@@ -232,15 +262,17 @@ void mshell_init(void) {
     char *buffer;
     char **data;
 
-    int status[2] = {0, 0};
+    int status[4] = {0, 0, 0, 0};
+
+    // status[2] is amount of words in command
 
     do {
 
         printf ("> ");
 
         buffer = mshell_getline(status);
-        data = mshell_getwords(buffer);
-        status[1] = mshell_execute(data);
+        data = mshell_getwords(buffer,status);
+        status[1] = mshell_execute(data, status);
 
         free(buffer);
         free(data);
