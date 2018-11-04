@@ -11,14 +11,15 @@ char *mshell_getline(int *status);      // getting line until ; or EOF
 char **mshell_getwords(char *buffer, int *status);   // splitting buffer into the words, filling last part with NULL
 int mshell_execute(char **data, int *status);        // working with data we got in _getwords, must be splitted into xtra's
 
-int mshell_forks(char **data);          // working with data - fork way
-int mshell_background(char **data);     // working with data - background, equal to forks but without wait
+int mshell_forks(char **data);                       // working with data - fork way
+int mshell_background(char **data);                  // working with data - background, equal to forks but without wait
 
-int mshell_cd(char **data);             // working with data - got cd
-int mshell_exit(char **data);           // working with data - got exit
-int mshell_help(char **data);           // printing all builtins i made
-int mshell_builtins_am();               // returning amount of builtin functions we realise
+int mshell_cd(char **data);                          // working with data - got cd
+int mshell_exit(char **data);                        // working with data - got exit
+int mshell_help(char **data);                        // printing all builtins i made
+int mshell_builtins_am();                            // returning amount of builtin functions we realise
 
+int mshell_background2(char **data, int *status);    // hm... pending edition of background
 
 char *builtin_str[] = {
         "cd", "exit","help"
@@ -218,7 +219,8 @@ int mshell_cd(char **data) {
             perror("mshell - cd\n");
     }
 
-    return 0;
+
+    return 1;
 }
 int mshell_exit(char **data) {
     return 0;
@@ -250,6 +252,8 @@ int mshell_execute(char **data, int *status) {
     }
 
     if (strcmp(data[words_amount - 1], "&") == 0) {
+
+        status[3] += 1;
         data[words_amount - 1] = NULL;
         return mshell_background(data);
     } else {
@@ -278,6 +282,7 @@ void mshell_init(void) {
     int status[4] = {0, 0, 0, 0};
 
     // status[2] is amount of words in command
+    // status[3] is amount of running background programs
 
     do {
 
@@ -292,4 +297,45 @@ void mshell_init(void) {
 
     } while (status[0] && status[1]);
 
+}
+
+
+int mshell_background2(char **data, int *status) {
+
+    int pid,pid1, wpid;
+    int stat;
+
+    if (pid = fork() == 0) {
+
+         if (pid1 = fork() == 0) {
+             if (execvp(data[0], data) == -1) {
+                 perror("mshell - exec");
+             }
+
+             exit(EXIT_FAILURE);
+
+         } else {
+
+             if (pid1 < 0) {
+
+                 perror("mshell - fork");
+             } else {
+
+                 printf("[%d], %d\n", status[3], pid1);
+
+                 do {
+
+                     wpid = waitpid(pid, &stat, WUNTRACED);
+                 } while (!WIFEXITED(stat) && !WIFSIGNALED(stat));
+
+                 printf("[%d], Done, %d\n", status[3],wpid);
+                 status[3] -= 1;
+             }
+         }
+
+    } else if (pid < 0) {
+        perror("mshell - fork");
+    }
+
+    return 1;
 }
