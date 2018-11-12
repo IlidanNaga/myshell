@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <signal.h>
 
 #include <sys/wait.h>
 #include <sys/types.h>
@@ -22,6 +24,10 @@ int mshell_builtins_am();                            // returning amount of buil
 int mshell_background2(char **data, int *status);    // hm... pending edition of background
 
 void clearing_rubbish(char ***data, int *status);
+int mshell_getlex(char **buffer, int * status);       // returning lexeme type, in **buffer - string of inner data
+char **mshell_buildarr(int *status);                  // building array from lexemes we got
+int mshell_background3(char **data, int *status);
+
 
 char *builtin_str[] = {
         "cd", "exit","help"
@@ -31,8 +37,17 @@ int (*builtin_func[]) (char **) = {
         &mshell_cd, &mshell_exit, &mshell_help
 };
 
+enum lexemes {SC, IN, OUT, ADD, PIPE, OR, BACK, AND, LP, RP, END, ERROR, WORD};
 
-int main() {
+int main(int argc, char **argv) {
+
+    if (argc == 2) {
+        int fd = open(argv[1], O_RDONLY);
+        if (fd != -1) {
+            dup2(fd, 0);
+            close(fd);
+        }
+    }
 
     mshell_init();
 
@@ -170,6 +185,7 @@ char** mshell_getwords(char *buffer, int *status) {
 
 }
 
+
 int mshell_background(char **data) {
 
     int pid, wpid;
@@ -193,11 +209,10 @@ int mshell_forks(char **data) {
     int pid, wpid;
     int stat;
 
-    if (pid = fork() == 0) {
+    if ((pid = fork()) == 0) {
 
-        if (execvp(data[0], data) == -1) {
-            perror("mshell - exec");
-        }
+        execvp(data[0], data);
+        perror("mshell - exec");
 
         exit(EXIT_FAILURE);
 
@@ -213,7 +228,6 @@ int mshell_forks(char **data) {
 
     return 1;
 }
-
 int mshell_builtins_am() {
 
     return sizeof(builtin_str) / sizeof(char *);
@@ -232,15 +246,18 @@ int mshell_cd(char **data) {
 
             int i;
 
-            for (i = 1; i < sizeof(data[1]); i ++) {
-                buffer[15 + i] == data[1][i];
+            for (i = 1; i <= strlen(data[1]); i ++) {
+                buffer[15 + i] = data[1][i];
             }
 
             free(data[1]);
             data[1] = buffer;
+
+            puts(data[1]);
         }
+
         if (chdir(data[1]) != 0)
-            perror("mshell - cd\n");
+            perror("mshell - cd");
     }
 
 
@@ -282,7 +299,7 @@ int mshell_execute(char **data, int *status) {
 
         status[3] += 1;
         data[words_amount - 1] = NULL;
-        return mshell_background(data);
+        return mshell_background3(data, status);
     } else {
         data = (char **) realloc(data, words_amount * sizeof(char *));
         data[words_amount] = NULL;
@@ -301,7 +318,6 @@ int mshell_execute(char **data, int *status) {
 
     return mshell_forks(data);
 }
-
 void mshell_init(void) {
 
     char *buffer;
@@ -320,13 +336,17 @@ void mshell_init(void) {
         data = mshell_getwords(buffer,status);
         status[1] = mshell_execute(data, status);
 
-        free(buffer);
         free(data);
+        free(buffer);
+
+        data = NULL;
+        buffer = NULL;
 
     } while (status[0] && status[1]);
 
 }
 
+// unused
 void clearing_rubbish(char ***data, int *status) {
 
     int i;
@@ -337,7 +357,6 @@ void clearing_rubbish(char ***data, int *status) {
 
     free((*data));
 }
-
 int mshell_background2(char **data, int *status) {
 
     int pid,pid1, wpid;
@@ -373,6 +392,134 @@ int mshell_background2(char **data, int *status) {
 
     } else if (pid < 0) {
         perror("mshell - fork");
+    }
+
+    return 1;
+}
+int mshell_getlex(char **buffer, int *status) {
+
+    char buff;
+    char *local_buffer = NULL;
+    int local_len = 0;
+
+    buff = getchar();
+
+    switch(buff) {
+
+        case ';':
+
+            return SC;
+        case '<':
+
+            return IN;
+        case '>':
+
+            buff = getchar();
+
+            if (buff == '>')
+                return ADD;
+            else {
+                ungetc(buff, stdin);
+                return OUT;
+            }
+        case '&':
+
+            buff = getchar();
+            if (buff == '&')
+                return AND;
+            else {
+                ungetc(buff, stdin);
+                return BACK;
+            }
+        case '(':
+            return LP;
+        case ')':
+            return RP;
+        case EOF:
+
+            return END;
+        case '#':
+        case ' ':
+        case '\n':
+
+            return END;
+        case '"':
+
+            buff = getchar();
+
+            while (buff != '"') {
+
+                if (buff == '\n' || buff == EOF)
+                    return ERROR;
+
+                if (local_len % we_add_len == 0)
+                    local_buffer = (char *) realloc(local_buffer, (local_len + we_add_len) * sizeof(char));
+
+                local_buffer[local_len] = buff;
+                local_len ++;
+
+                buff = getchar();
+            }
+
+            (*buffer) = local_buffer;
+            status[2] = local_len;
+            return WORD;
+        default:
+
+            while (buff != ' ' && buff != '\n' && buff != EOF) {
+
+                if (local_len % we_add_len == 0)
+                    local_buffer = (char *) realloc(local_buffer, (local_len + we_add_len) * sizeof(char));
+
+                local_buffer[local_len] = buff;
+                local_len ++;
+
+                buff = getchar();
+            }
+
+            (*buffer) = local_buffer;
+            status[2] = local_len;
+            return WORD;
+    }
+}
+
+int mshell_background3(char **data, int *status) {
+
+    /* we get in:
+     * data - array of words, last one is already NULL
+     * status - array(4) of int, status[2] - amount of words */
+
+    int pid, stat, wpid;
+
+    if ((pid = fork()) == 0) {
+
+        int son_pid;
+        int fd = open("/dev/null", O_RDONLY);
+        dup2(fd, 0);
+        close(fd);
+
+        if ((son_pid = fork()) == 0) {
+
+            execvp(data[0], data);
+            perror("background - exec");
+
+            exit(EXIT_FAILURE);
+
+        } else if (son_pid < 0) {
+            perror("background - fork");
+        } else {
+
+            int die_pid = getpid();
+            kill(die_pid, SIGKILL);
+        }
+    } else if (pid < 0) {
+        perror("mshell - fork");
+    } else {
+
+        do {
+
+            wpid = waitpid(pid, &stat, WUNTRACED);
+        } while (!WIFEXITED(stat) && !WIFSIGNALED(stat));
     }
 
     return 1;
