@@ -105,6 +105,10 @@ void mshell_init(void) {
 
         for (i = 0; i < status[2]; i++) {
             printf("Words amount in command %d\n", data[i].data_len);
+            if (data[i].status[IN])
+                puts(data[i].relocate_in);
+            if (data[i].status[OUT])
+                puts(data[i].relocate_out);
             for (j = 0; j < data[i].data_len - 1; j++)
                 puts(data[i].data[j]);
         }
@@ -271,6 +275,11 @@ struct command *mshell_build(int *status) {
             case WORD:
 
                 data = (struct command *) realloc(data, (commands_amount + 1) * sizeof(struct command));
+                data[commands_amount].relocate_in = NULL;
+                data[commands_amount].relocate_out = NULL;
+
+                for (k = 0; k < enum_amount; k++)
+                    data[commands_amount].status[k] = 0;
 
                 command_len = 0;
                 command_buffer = (char **) malloc(sizeof(char *));
@@ -283,23 +292,62 @@ struct command *mshell_build(int *status) {
 
                     new_stat = mshell_getlex(&buffer, status);
 
-                    if (new_stat != WORD) {
-                        used_new = 1;
-                        command_buffer = (char **) realloc(command_buffer, (command_len + 1) * sizeof(char *));
-                        command_buffer[command_len] = NULL;
-                        command_len ++;
+                    switch(new_stat) {
 
-                    } else {
-                        command_buffer = (char **) realloc(command_buffer, (command_len + 1) * sizeof(char *));
-                        command_buffer[command_len] = buffer;
-                        command_len ++;
+                        case WORD:
+
+                            command_buffer = (char **) realloc(command_buffer, (command_len + 1) * sizeof(char *));
+                            command_buffer[command_len] = buffer;
+                            command_len ++;
+
+                            break;
+
+                        case IN:
+
+                            buffer = NULL;
+
+                            new_stat = mshell_getlex(&buffer, status);
+
+                            if (new_stat != WORD) {
+                                exit_flag = 2;
+                                printf("Error - command composition\n");
+                                break;
+                            }
+
+                            data[commands_amount].relocate_in = buffer;
+                            data[commands_amount].status[IN] = 1;
+                            break;
+
+                        case OUT:
+
+                            buffer = NULL;
+
+                            new_stat = mshell_getlex(&buffer, status);
+
+                            if (new_stat != WORD) {
+                                exit_flag = 2;
+                                printf("Error - command composition\n");
+                                break;
+                            }
+
+                            data[commands_amount].relocate_out = buffer;
+                            data[commands_amount].status[OUT] = 1;
+                            break;
+
+                        default:
+
+                            used_new = 1;
+                            command_buffer = (char **) realloc(command_buffer, (command_len + 1) * sizeof(char *));
+                            command_buffer[command_len] = NULL;
+                            command_len ++;
+                            break;
+
                     }
-                } while (!used_new);
+
+                } while (!used_new && !exit_flag);
 
                 data[commands_amount].data = command_buffer;
                 data[commands_amount].data_len = command_len;
-                for (k = 0; k < enum_amount; k++)
-                    data[commands_amount].status[k] = 0;
 
                 data[commands_amount].status[WORD] = 1;
 
@@ -344,23 +392,14 @@ struct command *mshell_build(int *status) {
 
             case IN:
 
-                if (commands_amount == 0) {
-                    exit_flag = 2;
-                    printf("Error - command composition\n");
-                    break;
-                }
-                data[commands_amount - 1].status[IN] = 1;
-
+                exit_flag = 2;
+                printf("Error - command composition\n");
                 break;
 
             case OUT:
 
-                if (commands_amount == 0) {
-                    exit_flag = 2;
-                    printf("Error - command composition\n");
-                    break;
-                }
-                data[commands_amount - 1].status[OUT] = 1;
+                exit_flag = 2;
+                printf("Error - command composition\n");
                 break;
 
             case PIPE:
