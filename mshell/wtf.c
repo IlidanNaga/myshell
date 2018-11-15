@@ -4,9 +4,14 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <ncurses.h>
 
 #include <sys/wait.h>
 #include <sys/types.h>
+#include <limits.h>
+
+int background_pid[256] = {0};
+int background_amount = 0;
 
 void mshell_init(void);                 // function which makes everything work
 char *mshell_getline(int *status);      // getting line until ; or EOF
@@ -14,32 +19,29 @@ char **mshell_getwords(char *buffer, int *status);   // splitting buffer into th
 int mshell_execute(char **data, int *status);        // working with data we got in _getwords, must be splitted into xtra's
 
 int mshell_forks(char **data);                       // working with data - fork way
-int mshell_background(char **data);                  // working with data - background, equal to forks but without wait
 
 int mshell_cd(char **data);                          // working with data - got cd
 int mshell_exit(char **data);                        // working with data - got exit
 int mshell_help(char **data);                        // printing all builtins i made
 int mshell_builtins_am();                            // returning amount of builtin functions we realise
-
-int mshell_background2(char **data, int *status);    // hm... pending edition of background
-
 void clearing_rubbish(char ***data, int *status);
 int mshell_getlex(char **buffer, int * status);       // returning lexeme type, in **buffer - string of inner data
 char **mshell_buildarr(int *status);                  // building array from lexemes we got
-int mshell_background3(char **data, int *status);
-
+int mshell_background3(char **data, int *status);     // background implementation func
+int mshell_background(char **data, int *status);      // one more idea of implementation
+void mshell_background_help();                        // returning for status of programs
 
 char *builtin_str[] = {
         "cd", "exit","help"
 };
-
 int (*builtin_func[]) (char **) = {
         &mshell_cd, &mshell_exit, &mshell_help
 };
-
 enum lexemes {SC, IN, OUT, ADD, PIPE, OR, BACK, AND, LP, RP, END, ERROR, WORD};
 
 int main(int argc, char **argv) {
+
+    signal(SIGINT, SIG_IGN);
 
     if (argc == 2) {
         int fd = open(argv[1], O_RDONLY);
@@ -88,7 +90,6 @@ char* mshell_getline(int *status) {
     buffer[buffer_len] = '\0';
     return buffer;
 }
-
 char** mshell_getwords(char *buffer, int *status) {
 
     if (buffer == NULL)
@@ -185,31 +186,14 @@ char** mshell_getwords(char *buffer, int *status) {
 
 }
 
-
-int mshell_background(char **data) {
-
-    int pid, wpid;
-    int stat;
-
-    if (pid = fork() == 0) {
-
-        if (execvp(data[0], data) == -1) {
-            perror("mshell - exec");
-        }
-
-        exit(EXIT_FAILURE);
-    } else if (pid < 0) {
-        perror("mshell - fork");
-    }
-
-    return 1;
-}
 int mshell_forks(char **data) {
 
     int pid, wpid;
     int stat;
 
     if ((pid = fork()) == 0) {
+
+        signal(SIGINT, SIG_DFL);
 
         execvp(data[0], data);
         perror("mshell - exec");
@@ -228,6 +212,7 @@ int mshell_forks(char **data) {
 
     return 1;
 }
+
 int mshell_builtins_am() {
 
     return sizeof(builtin_str) / sizeof(char *);
@@ -235,7 +220,15 @@ int mshell_builtins_am() {
 int mshell_cd(char **data) {
 
     if (data[1] == NULL) {
-        perror("mshell: waiting arguments for cd");
+
+
+        char *buffer = (char *) malloc(1024 * sizeof(char));
+        memmove(buffer, "/home/ilidannaga", 16);
+        data[1] = buffer;
+
+        if (chdir(data[1]) != 0)
+            perror("mshell - cd");
+
     } else {
 
         if (data[1][0] == '~') {
@@ -267,6 +260,7 @@ int mshell_exit(char **data) {
     return 0;
 }
 int mshell_help(char **data) {
+    /* printing all background data */
 
     int i;
 
@@ -299,7 +293,7 @@ int mshell_execute(char **data, int *status) {
 
         status[3] += 1;
         data[words_amount - 1] = NULL;
-        return mshell_background3(data, status);
+        return mshell_background(data, status);
     } else {
         data = (char **) realloc(data, words_amount * sizeof(char *));
         data[words_amount] = NULL;
@@ -318,7 +312,9 @@ int mshell_execute(char **data, int *status) {
 
     return mshell_forks(data);
 }
+
 void mshell_init(void) {
+    /* hub, controls the work of the program*/
 
     char *buffer;
     char **data;
@@ -330,7 +326,11 @@ void mshell_init(void) {
 
     do {
 
-        printf ("> ");
+        char path[PATH_MAX];
+
+        getcwd(path, PATH_MAX);
+
+        printf("%s: ", path);
 
         buffer = mshell_getline(status);
         data = mshell_getwords(buffer,status);
@@ -342,60 +342,85 @@ void mshell_init(void) {
         data = NULL;
         buffer = NULL;
 
+
+        mshell_background_help();
     } while (status[0] && status[1]);
 
 }
+int mshell_background(char **data, int *status) {
+    /* background implementation */
 
-// unused
-void clearing_rubbish(char ***data, int *status) {
+    int pid;
 
-    int i;
-    for (i = 0; i < status[2]; i ++) {
+    int fd_hold = dup(0);
 
-        free((*data)[i]);
-    }
+    int fd = open("/dev/null", O_RDONLY);
+    dup2(fd, 0);
+    close(fd);
 
-    free((*data));
-}
-int mshell_background2(char **data, int *status) {
+    signal(SIGINT, SIG_IGN);
 
-    int pid,pid1, wpid;
-    int stat;
+    if ((pid = fork()) == 0) {
 
-    if (pid = fork() == 0) {
+        execvp(data[0], data);
+        perror("background - exec");
 
-        if (pid1 = fork() == 0) {
-            if (execvp(data[0], data) == -1) {
-                perror("mshell - exec");
-            }
+        exit(EXIT_FAILURE);
+    } else if (pid < 0) {
+        perror("background - fork");
+    } else {
 
-            exit(EXIT_FAILURE);
+        int i;
 
-        } else {
-
-            if (pid1 < 0) {
-
-                perror("mshell - fork");
-            } else {
-
-                printf("[%d], %d\n", status[3], pid1);
-
-                do {
-
-                    wpid = waitpid(pid, &stat, WUNTRACED);
-                } while (!WIFEXITED(stat) && !WIFSIGNALED(stat));
-
-                printf("[%d], Done, %d\n", status[3],wpid);
-                status[3] -= 1;
+        for (i = 0; i < 256; i++) {
+            if (background_pid[i] == 0) {
+                background_pid[i] = pid;
+                break;
             }
         }
 
-    } else if (pid < 0) {
-        perror("mshell - fork");
+        if (i < 256)
+            printf ("[%d] %d \n", (i+1), pid);
+        else
+            printf("Error - background process table overflow\n");
+
     }
 
+    dup2(fd_hold, 0);
     return 1;
 }
+void mshell_background_help() {
+    /* checking status of background programs*/
+    int i;
+
+    for (i = 0; i < 256; i++) {
+
+        int pid = background_pid[i];
+
+        if (pid != 0) {
+            int stat;
+            int wpid = waitpid(pid, &stat, WNOHANG);
+
+            if (wpid == 0) {
+
+            } else if (wpid == -1) {
+                perror("mshell - background - exit");
+            } else {
+
+                if (WIFEXITED(stat))
+                    printf("\n[%d] %d - Done\n", (i + 1), pid);
+                else
+                    printf("\n[%d] %d - Error\n", (i + 1), pid);
+
+                background_pid[i] = 0;
+            }
+        }
+    }
+
+}
+
+
+// unused
 int mshell_getlex(char **buffer, int *status) {
 
     char buff;
@@ -482,7 +507,6 @@ int mshell_getlex(char **buffer, int *status) {
             return WORD;
     }
 }
-
 int mshell_background3(char **data, int *status) {
 
     /* we get in:
@@ -500,6 +524,7 @@ int mshell_background3(char **data, int *status) {
 
         if ((son_pid = fork()) == 0) {
 
+
             execvp(data[0], data);
             perror("background - exec");
 
@@ -509,6 +534,9 @@ int mshell_background3(char **data, int *status) {
             perror("background - fork");
         } else {
 
+
+            printf("[%d] %d \n", (background_amount + 1), son_pid);
+
             int die_pid = getpid();
             kill(die_pid, SIGKILL);
         }
@@ -517,10 +545,55 @@ int mshell_background3(char **data, int *status) {
     } else {
 
         do {
-
+            background_amount ++;
             wpid = waitpid(pid, &stat, WUNTRACED);
         } while (!WIFEXITED(stat) && !WIFSIGNALED(stat));
     }
 
     return 1;
 }
+
+/*void background_check() {
+
+    int i, num = background_amount;
+    int son_pid;
+    FILE *f = fopen("background_storage.txt", "r");
+
+    for (i = 0; i < background_amount; i++) {
+
+        fscanf(f, "%d", &son_pid);
+        char *use =
+
+        int pid, wpid, stat;
+
+        if ((pid = fork()) == 0) {
+
+            int fd = open("background_check.txt", O_WRONLY);
+            dup2(fd, 1);
+            close(fd);
+
+            execlp("ps", )
+
+        } else if (pid < 0) {
+        perror("mshell - fork");
+    } else {
+
+        do {
+            background_amount ++;
+            wpid = waitpid(pid, &stat, WUNTRACED);
+        } while (!WIFEXITED(stat) && !WIFSIGNALED(stat));
+    }
+
+    }
+    fclose(f);
+
+    f = fopen("background_storage.txt", "w");
+
+    background_amount = num;
+    for (i = 0; i < num; i++) {
+        fprintf(f, "%d", background_pids[i]);
+    }
+    fclose(f);
+}
+
+*/

@@ -9,10 +9,17 @@
 #include <sys/types.h>
 #include <limits.h>
 
+
+enum lexemes {NUL, SC, IN, OUT, ADD, PIPE, OR, BACK, AND, LP, RP, END, ERROR, WORD, EndFile, LP_inside, RP_inside, AND_target, OR_target};
+#define enum_amount OR_target
+
 struct command {
 
     char **data;
-    int status[15];
+    char *relocate_in;
+    char *relocate_out;
+    int data_len;
+    int status[OR_target];
 };
 
 int background_pid[256] = {0};
@@ -35,7 +42,11 @@ int mshell_builtins_am();                            // returning amount of buil
 int one_more_execute(char **data, int *status, int *build); //pending
 int redirect_out(char **data, char **target, int *status);   //redirecting stdout into target
 int redirect_in(char **data, char **source, int *status);    //redirecting stdin into source
-int mshell_factory(char ***data, int commands_amount);       //factory... that's all i guess
+
+struct command *mshell_build(int *status);
+int and_one_more(struct command *data, int *status);
+
+
 
 char *builtin_str[] = {
         "cd", "exit","help"
@@ -43,8 +54,6 @@ char *builtin_str[] = {
 int (*builtin_func[]) (char **) = {
         &mshell_cd, &mshell_exit, &mshell_help
 };
-enum lexemes {NUL, SC, IN, OUT, ADD, PIPE, OR, BACK, AND, LP, RP, END, ERROR, WORD, EndFile};
-
 
 // "main" - literaly does nothing, just redirects input if we get file in
 int main(int argc, char **argv) {
@@ -70,12 +79,13 @@ int main(int argc, char **argv) {
 void mshell_init(void) {
     /* hub, controls the work of the program*/
 
-    char **data;
+    struct command *data = NULL;
     int *build = NULL;
 
     int status[4] = {0, 0, 0, 0};
 
-    // status[2] is amount of words in command
+    // status[0] is error trigger
+    // status[2] is amount of commands
     // status[3] is length of our build-like data implementation
     // build - like implementation lays in int *build
 
@@ -87,11 +97,23 @@ void mshell_init(void) {
 
         printf("%s: ", path);
 
-        data = mshell_buildarr(status, &build);
-        status[1] = one_more_execute(data, status, build);
+        data = mshell_build(status);
 
+        int i, j;
+
+        printf("commands amount %d\n", status[2]);
+
+        for (i = 0; i < status[2]; i++) {
+            printf("Words amount in command %d\n", data[i].data_len);
+            for (j = 0; j < data[i].data_len - 1; j++)
+                puts(data[i].data[j]);
+        }
+
+      //  if (!status[0])
+        //    status[1] = one_more_execute(data, status, build);
+       // else
+        status[1] = 1;
         data = NULL;
-
         mshell_background_help();
     } while (status[1]);
 
@@ -110,6 +132,8 @@ int mshell_getlex(char **buffer, int *status) {
     while(1) {
 
         buff = getchar();
+
+        printf("We_are_here %c\n", buff);
 
         switch (buff) {
 
@@ -210,126 +234,201 @@ int mshell_getlex(char **buffer, int *status) {
         }
     }
 }
-// building string array
-char **mshell_buildarr(int *status, int **build) {
+// building struct command array
+struct command *mshell_build(int *status) {
 
-    char **data = NULL;
-    char *buffer;
-    int words_num = 0;
+    struct command *data = NULL;
+    char *buffer = NULL;
+    int commands_amount = 0;
     int stat;
-    int *laziness = NULL;
-    int info_len = 0;
+
+    int k;
+
+    char **command_buffer = NULL;
+    int command_len = 0;
+
+    int new_stat;
+    int used_new = 0;
+    int exit_flag = 0;
+
+    int and_flag = 0;
+    int or_flag = 0;
 
     do {
 
-        buffer = NULL;
 
-        stat = mshell_getlex(&buffer, status);
+        if (used_new) {
+            stat = new_stat;
+            used_new = 0;
+        } else {
 
-        laziness = (int *) realloc(laziness, (info_len + 1) * sizeof(int));
-        laziness[info_len] = stat;
-        info_len ++;
+            buffer = NULL;
+            stat = mshell_getlex(&buffer, status);
+        }
 
         switch(stat) {
 
-            case IN:
+            case WORD:
 
-                data = (char **) realloc(data,(words_num + 1) * sizeof(char*));
-                data[words_num] = "<";
-                words_num ++;
+                data = (struct command *) realloc(data, (commands_amount + 1) * sizeof(struct command));
 
-                break;
+                command_len = 0;
+                command_buffer = (char **) malloc(sizeof(char *));
+                command_buffer[0] = buffer;
+                command_len ++;
 
-            case OUT:
+                used_new = 0;
+                do {
+                    buffer = NULL;
 
-                data = (char **) realloc(data,(words_num + 1) * sizeof(char*));
-                data[words_num] = ">";
-                words_num ++;
+                    new_stat = mshell_getlex(&buffer, status);
 
-                break;
+                    if (new_stat != WORD) {
+                        used_new = 1;
+                        command_buffer = (char **) realloc(command_buffer, (command_len + 1) * sizeof(char *));
+                        command_buffer[command_len] = NULL;
+                        command_len ++;
 
-            case PIPE:
+                    } else {
+                        command_buffer = (char **) realloc(command_buffer, (command_len + 1) * sizeof(char *));
+                        command_buffer[command_len] = buffer;
+                        command_len ++;
+                    }
+                } while (!used_new);
 
-                data = (char **) realloc(data,(words_num + 1) * sizeof(char*));
-                data[words_num] = "|";
-                words_num ++;
+                data[commands_amount].data = command_buffer;
+                data[commands_amount].data_len = command_len;
+                for (k = 0; k < enum_amount; k++)
+                    data[commands_amount].status[k] = 0;
 
-                break;
+                data[commands_amount].status[WORD] = 1;
 
-            case OR:
+                if (and_flag) {
+                    and_flag = 0;
+                    data[commands_amount].status[AND_target] = 1;
+                }
+                if (or_flag) {
+                    or_flag = 0;
+                    data[commands_amount].status[OR_target] = 1;
+                }
 
-                data = (char **) realloc(data,(words_num + 1) * sizeof(char*));
-                data[words_num] = "||";
-                words_num ++;
+                commands_amount ++;
 
                 break;
 
             case BACK:
 
-                data = (char **) realloc(data,(words_num + 1) * sizeof(char*));
-                data[words_num] = "&";
-                words_num ++;
+                if (commands_amount == 0) {
+                    printf("Error - word_composition");
+                    exit_flag = 2;
+                    break;
+                }
 
+                data[commands_amount - 1].status[BACK] = 1;
                 break;
 
-            case AND:
+            case EndFile:
 
-                data = (char **) realloc(data,(words_num + 1) * sizeof(char*));
-                data[words_num] = "&&";
-                words_num ++;
-
+                exit_flag = 1;
                 break;
-
-            case LP:
-
-                data = (char **) realloc(data,(words_num + 1) * sizeof(char*));
-                data[words_num] = "(";
-                words_num ++;
-
-                break;
-
-            case RP:
-
-                data = (char **) realloc(data,(words_num + 1) * sizeof(char*));
-                data[words_num] = ")";
-                words_num ++;
-
-                break;
-
             case END:
+
+                exit_flag = 1;
                 break;
 
             case ERROR:
 
-                printf("Wrong word buildage\n");
+                exit_flag = 2;
                 break;
 
-            case WORD:
 
-                data = (char **) realloc(data,(words_num + 1) * sizeof(char*));
-                data[words_num] = buffer;
-                words_num ++;
+            case IN:
+
+                if (commands_amount == 0) {
+                    exit_flag = 2;
+                    printf("Error - command composition\n");
+                    break;
+                }
+                data[commands_amount - 1].status[IN] = 1;
 
                 break;
 
-            case EndFile:
-                stat = END;
+            case OUT:
+
+                if (commands_amount == 0) {
+                    exit_flag = 2;
+                    printf("Error - command composition\n");
+                    break;
+                }
+                data[commands_amount - 1].status[OUT] = 1;
                 break;
+
+            case PIPE:
+
+                if (commands_amount == 0) {
+                    exit_flag = 2;
+                    printf("Error - command composition\n");
+                    break;
+                }
+                data[commands_amount - 1].status[PIPE] = 1;
+                break;
+
+            case AND:
+
+                if (commands_amount == 0) {
+                    exit_flag = 2;
+                    printf("Error - command composition\n");
+                    break;
+                }
+                data[commands_amount - 1].status[AND] = 1;
+                and_flag = 1;
+                break;
+
+            case OR:
+
+                if (commands_amount == 0) {
+                    exit_flag = 2;
+                    printf("Error - command composition\n");
+                    break;
+                }
+                data[commands_amount - 1].status[OR] = 1;
+                or_flag = 1;
+                break;
+
 
             default:
                 break;
+
         }
+    } while (!exit_flag);
 
-    } while (stat != END && stat != ERROR);
+    if (exit_flag == 2)
+        status[0] = 1;
 
-    status[2] = words_num;
-    status[3] = info_len;
+    if (commands_amount == 0)
+        status[0] = 1;
 
-    (*build) = laziness;
-
+    status[2] = commands_amount;
     return data;
 
 }
+
+// hub, relocating into command related functions;
+int and_one_more(struct command *data, int *status) {
+
+    //we have a structure with:
+    //set of lines char **data
+    //lines amount (dunno 4 what, but whynot)
+    //int status[OR_target] - tells what was used on it, OR_target - the last enumerate we used
+    //status[2] - total amount of commands we have
+
+    int i = 0;
+
+    return 1;
+
+}
+
+
 // one more hub function, transmits data
 int one_more_execute(char **data, int *status, int *build) {
 
@@ -489,7 +588,7 @@ int one_more_execute(char **data, int *status, int *build) {
                     printf("Error - command composition\n");
                     return 1;
                 }
-                return mshell_factory(command_storage, command_amount);
+                //return mshell_factory(command_storage, command_amount);
 
                 break;
             default:
@@ -781,41 +880,4 @@ int mshell_help(char **data) {
     printf("\n");
 
     return 1;
-}
-
-
-//factory
-int mshell_factory(char ***data, int commands_amount) {
-
-    int pid, i = 0, status;
-    int fd[2];
-
-    while (i < commands_amount) {
-
-        pipe(fd);
-        pid = fork();
-
-        if (pid == 0) {
-
-            if (i + 1 != commands_amount) {
-
-                dup2(fd[1], 1);
-            }
-            close(fd[1]);
-            close(fd[0]);
-            execvp(data[i][0], data[i]);
-            perror("Transporter - exec");
-            exit(EXIT_FAILURE);
-        }
-        dup2(fd[0],0);
-        close(fd[1]);
-        close(fd[0]);
-
-        i++;
-    }
-
-    while (wait(NULL) != -1);
-
-    return 1;
-
 }
