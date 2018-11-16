@@ -66,6 +66,11 @@ void mshell_conv(struct command *data, int length, int *err);
 
 
 int and_execute(struct command *data, int *status);
+void background_execute(struct command *data, int *status);
+
+
+int mshell_back_forks(struct command data, int *err);
+void mshell_back_conv(struct command *data, int length, int*err);
 
 char *builtin_str[] = {
         "cd", "exit","help"
@@ -99,22 +104,20 @@ void mshell_init(void) {
     /* hub, controls the work of the program*/
 
     struct command *data = NULL;
-    int *build = NULL;
-
-    int status[4] = {0, 0, 0, 0};
+    int status[5] = {0, 0, 0, 0, 0};
 
 
     // status[0] is error trigger
-    // status[1] is background useage trigger
+    // status[1] is loop trigger
     // status[2] is amount of commands
     // status[3] is length of our build-like data implementation
     // build - like implementation lays in int *build
-
+    // status[4] is background trigger
     do {
 
         int k;
 
-        for (k = 0; k < 4; k++)
+        for (k = 0; k < 5; k++)
             status[k] = 0;
 
         char path[PATH_MAX];
@@ -125,7 +128,6 @@ void mshell_init(void) {
 
         data = mshell_build(status);
 
-
         /*
         int i, j;
 
@@ -133,16 +135,21 @@ void mshell_init(void) {
 
         for (i = 0; i < status[2]; i++) {
             printf("Words amount in command %d\n", data[i].data_len);
-            if (data[i].status[PIPE])
+            if (data[i].status[BACK])
                 printf("BEEP %d\n", i);
             for (j = 0; j < data[i].data_len - 1; j++)
                 puts(data[i].data[j]);
         }
-         */
+        */
 
-        if (!status[0])
-            status[1] = and_execute(data, status);
-        else
+        if (!status[0]) {
+            if (!status[4]) {
+                status[1] = and_execute(data, status);
+            } else {
+                status[1] = 1;
+                background_execute(data, status);
+            }
+        } else
             status[1] = 1;
 
         data = NULL;
@@ -413,7 +420,7 @@ struct command *mshell_build(int *status) {
                     exit_flag = 2;
                     break;
                 }
-                status[1] = 1;
+                status[4] = 1;
                 data[commands_amount - 1].status[BACK] = 1;
                 break;
 
@@ -526,77 +533,6 @@ struct command *mshell_build(int *status) {
 
 }
 
-// hub, relocating into command related functions;
-int and_one_more(struct command *data, int *status) {
-
-    //we have a structure with:
-    //set of lines char **data
-    //lines amount (dunno 4 what, but whynot)
-    //int status[OR_target] - tells what was used on it, OR_target - the last enumerate we used
-    //status[2] - total amount of commands we have
-
-    int i = 0, j, k;
-    int we_exit = 1;
-
-    int builtin_flag;
-    struct command current;
-
-    int and_flag = 0, and_succes = 0;
-    int or_flag = 0, or_succes = 0;
-    int execution_failed;
-
-    do {
-
-        current = data[i];
-
-        if (current.status[BACK]) {
-            we_exit = mshell_background(current);
-        } else if (current.status[PIPE]) {
-
-            struct command *transporter = (struct command *) malloc(sizeof(struct command));
-            int pipe_len = 1;
-            int whynot = 1;
-            transporter[0] = current;
-
-            i++;
-            while ((i < status[2]) && whynot) {
-
-                if (data[i].status[PIPE]) {
-                    transporter = (struct command *) realloc(transporter, (pipe_len + 1) * sizeof(struct command));
-                    transporter[pipe_len] = data[i];
-                    pipe_len ++;
-                } else {
-                    transporter = (struct command *) realloc(transporter, (pipe_len + 1) * sizeof(struct command));
-                    transporter[pipe_len] = data[i];
-                    pipe_len++;
-                    whynot = 0;
-                }
-                i++;
-            }
-
-            mshell_conv(transporter, pipe_len, &execution_failed);
-        } else {
-
-            builtin_flag = 0;
-            for (j = 0; j < mshell_builtins_am(); j++) {
-                if (strcmp(current.data[0], builtin_str[j]) == 0) {
-                    we_exit = (*builtin_func[j])(current, &execution_failed);
-                    builtin_flag = 1;
-                }
-            }
-
-            if (!builtin_flag)
-                we_exit = mshell_forks(current, &execution_failed);
-
-        }
-
-        i++;
-
-    } while (i < status[2] && we_exit);
-
-    return we_exit;
-
-}
 // background, 2 functions
 int mshell_background(struct command data) {
     /* background implementation */
@@ -659,9 +595,9 @@ void mshell_background_help() {
             } else {
 
                 if (WIFEXITED(stat))
-                    printf("\n[%d] %d - Done\n", (i + 1), pid);
+                    printf("[%d]+ %d  Done\n", (i + 1), pid);
                 else
-                    printf("\n[%d] %d - Error\n", (i + 1), pid);
+                    printf("[%d]- %d  Error\n", (i + 1), pid);
 
                 background_pid[i] = 0;
             }
@@ -673,7 +609,7 @@ void mshell_background_help() {
 // forking new process
 int mshell_forks(struct command data, int *err) {
 
-    int pid, wpid;
+    int pid;
     int stat;
 
     if ((pid = fork()) == 0) {
@@ -703,7 +639,7 @@ int mshell_forks(struct command data, int *err) {
 
         do {
 
-            wpid = waitpid(pid, &stat, WUNTRACED);
+            waitpid(pid, &stat, WUNTRACED);
         } while (!WIFEXITED(stat) && !WIFSIGNALED(stat));
 
         (*err) = !WIFEXITED(stat);
@@ -730,7 +666,6 @@ int mshell_cd(struct command data, int *err) {
             (*err) = 1;
             perror("mshell - cd");
         }
-
     } else {
 
         if (data.data[1][0] == '~') {
@@ -753,7 +688,7 @@ int mshell_cd(struct command data, int *err) {
         if (chdir(data.data[1]) != 0) {
             (*err) = 1;
             perror("mshell - cd");
-        }
+       }
     }
 
 
@@ -841,7 +776,7 @@ int and_execute(struct command *data, int *status) {
     //int status[OR_target] - tells what was used on it, OR_target - the last enumerate we used
     //status[2] - total amount of commands we have
 
-    int iter = 0, j, k;
+    int iter = 0, j;
     int we_exit = 1;
 
     int builtin_flag;
@@ -881,71 +816,66 @@ int and_execute(struct command *data, int *status) {
         if (current.status[OR])
             or_flag = 1;
 
-        if (current.status[BACK]) {
-            we_exit = mshell_background(current);
-        } else {
+        if ((current.status[AND_target] && and_succes) || (current.status[OR_target] && or_succes) || (!current.status[AND_target] && !current.status[OR_target])) {
 
-            if ((current.status[AND_target] && and_succes) || (current.status[OR_target] && or_succes) || (!current.status[AND_target] && !current.status[OR_target])) {
+            if (current.status[PIPE]) {
 
-                if (current.status[PIPE]) {
+                transporter = (struct command *) malloc(sizeof(struct command));
+                pipe_len = 1;
+                whynot = 1;
+                transporter[0] = current;
 
-                    transporter = (struct command *) malloc(sizeof(struct command));
-                    pipe_len = 1;
-                    whynot = 1;
-                    transporter[0] = current;
+                iter++;
+                while ((iter < status[2]) && whynot) {
 
-                    iter++;
-                    while ((iter < status[2]) && whynot) {
-
-                        if (data[iter].status[AND]) {
-                            and_flag = 1;
-                            whynot = 0;
-                        }
-                        if (data[iter].status[OR]) {
-                            or_flag = 1;
-                            whynot = 0;
-                        }
-
-                        if (data[iter].status[PIPE]) {
-                            transporter = (struct command *) realloc(transporter,
-                                                                     (pipe_len + 1) * sizeof(struct command));
-                            transporter[pipe_len] = data[iter];
-                            pipe_len++;
-
-                            iter ++;
-
-                        } else {
-                            transporter = (struct command *) realloc(transporter,
-                                                                     (pipe_len + 1) * sizeof(struct command));
-                            transporter[pipe_len] = data[iter];
-                            pipe_len++;
-                            whynot = 0;
-                            iter ++;
-                        }
+                    if (data[iter].status[AND]) {
+                        and_flag = 1;
+                        whynot = 0;
+                    }
+                    if (data[iter].status[OR]) {
+                        or_flag = 1;
+                        whynot = 0;
                     }
 
-                    mshell_conv(transporter, pipe_len, &execution_failed);
+                    if (data[iter].status[PIPE]) {
+                        transporter = (struct command *) realloc(transporter,
+                                                                 (pipe_len + 1) * sizeof(struct command));
+                        transporter[pipe_len] = data[iter];
+                        pipe_len++;
 
-                    free(transporter);
-                } else {
+                        iter ++;
 
-                    builtin_flag = 0;
-                    for (j = 0; j < mshell_builtins_am(); j++) {
-                        if (strcmp(current.data[0], builtin_str[j]) == 0) {
-                            we_exit = (*builtin_func[j])(current, &execution_failed);
-                            builtin_flag = 1;
-                        }
+                    } else {
+                        transporter = (struct command *) realloc(transporter,
+                                                                 (pipe_len + 1) * sizeof(struct command));
+                        transporter[pipe_len] = data[iter];
+                        pipe_len++;
+                        whynot = 0;
+                        iter ++;
                     }
-
-                    if (!builtin_flag)
-                        we_exit = mshell_forks(current, &execution_failed);
-
                 }
+
+                mshell_conv(transporter, pipe_len, &execution_failed);
+
+                free(transporter);
             } else {
 
-                while (data[iter].status[PIPE])
-                    iter++;
+                builtin_flag = 0;
+                for (j = 0; j < mshell_builtins_am(); j++) {
+                    if (strcmp(current.data[0], builtin_str[j]) == 0) {
+                        we_exit = (*builtin_func[j])(current, &execution_failed);
+                        builtin_flag = 1;
+                    }
+                }
+
+                if (!builtin_flag)
+                    we_exit = mshell_forks(current, &execution_failed);
+
             }
+        } else {
+
+            while (data[iter].status[PIPE])
+                iter++;
         }
 
         if (whynot) {
@@ -960,5 +890,251 @@ int and_execute(struct command *data, int *status) {
     } while (iter < status[2] && we_exit);
 
     return we_exit;
+
+}
+
+void background_execute(struct command *data, int *status) {
+    //we have a structure with:
+    //set of lines char **data
+    //lines amount (dunno 4 what, but whynot)
+    //int status[OR_target] - tells what was used on it, OR_target - the last enumerate we used
+    //status[2] - total amount of commands we have
+
+
+    int fd_hold = dup(0);
+
+    int fd = open("/dev/null", O_RDONLY);
+    dup2(fd, 0);
+    close(fd);
+
+    signal(SIGINT, SIG_IGN);
+
+    int iter = 0, j;
+    int we_exit = 1;
+
+    int builtin_flag;
+    struct command current;
+
+    int and_flag = 0, and_succes;
+    int or_flag = 0, or_succes;
+    int execution_failed = 0;
+
+    struct command *transporter = NULL;
+    int pipe_len;
+    int whynot;
+
+
+    do {
+
+        and_flag = 0;
+        or_flag = 0;
+        and_succes = 0;
+        or_succes = 0;
+        current = data[iter];
+        whynot = 1;
+
+        if (current.status[AND_target]) {
+
+            and_succes = !execution_failed;
+        }
+
+        if (current.status[OR_target]) {
+
+            or_succes = execution_failed;
+        }
+
+        if (current.status[AND])
+            and_flag = 1;
+
+        if (current.status[OR])
+            or_flag = 1;
+
+        if ((current.status[AND_target] && and_succes) || (current.status[OR_target] && or_succes) || (!current.status[AND_target] && !current.status[OR_target])) {
+
+            if (current.status[PIPE]) {
+
+                transporter = (struct command *) malloc(sizeof(struct command));
+                pipe_len = 1;
+                whynot = 1;
+                transporter[0] = current;
+
+                iter++;
+                while ((iter < status[2]) && whynot) {
+
+                    if (data[iter].status[AND]) {
+                        and_flag = 1;
+                        whynot = 0;
+                    }
+                    if (data[iter].status[OR]) {
+                        or_flag = 1;
+                        whynot = 0;
+                    }
+
+                    if (data[iter].status[PIPE]) {
+                        transporter = (struct command *) realloc(transporter,
+                                                                 (pipe_len + 1) * sizeof(struct command));
+                        transporter[pipe_len] = data[iter];
+                        pipe_len++;
+
+                        iter ++;
+
+                    } else {
+                        transporter = (struct command *) realloc(transporter,
+                                                                 (pipe_len + 1) * sizeof(struct command));
+                        transporter[pipe_len] = data[iter];
+                        pipe_len++;
+                        whynot = 0;
+                        iter ++;
+                    }
+                }
+
+                mshell_back_conv(transporter, pipe_len, &execution_failed);
+
+                free(transporter);
+            } else {
+
+                builtin_flag = 0;
+                for (j = 0; j < mshell_builtins_am(); j++) {
+                    if (strcmp(current.data[0], builtin_str[j]) == 0) {
+                        builtin_flag = 1;
+                    }
+                }
+
+                if (!builtin_flag)
+                    we_exit = mshell_back_forks(current, &execution_failed);
+
+            }
+        } else {
+
+            while (data[iter].status[PIPE])
+                iter++;
+        }
+
+        if (whynot) {
+            iter++;
+        }
+
+        if (and_flag || or_flag) {
+        } else {
+            execution_failed = 0;
+        }
+
+    } while (iter < status[2] && we_exit);
+
+    dup2(fd_hold, 0);
+}
+
+int mshell_back_forks(struct command data, int *err) {
+
+    int pid;
+
+    if ((pid = fork()) == 0) {
+
+        if (data.status[IN]) {
+            redirect_in(data.relocate_in);
+        }
+        if (data.status[OUT]) {
+            redirect_out(data.relocate_out);
+        }
+
+        if (data.status[ADD]) {
+            redirect_append(data.relocate_append);
+        }
+
+        execvp(data.data[0], data.data);
+        perror("mshell - exec");
+
+        exit(EXIT_FAILURE);
+
+    } else if (pid < 0) {
+        (*err) = 1;
+        perror("mshell - fork");
+    } else {
+
+
+        int i;
+
+        for (i = 0; i < 256; i++) {
+            if (background_pid[i] == 0) {
+                background_pid[i] = pid;
+                break;
+            }
+        }
+
+        if (i < 256)
+            printf ("[%d] %d \n", (i+1), pid);
+        else
+            printf("Error - background process table overflow\n");
+
+    }
+
+    return 1;
+}
+void mshell_back_conv(struct command *data, int length, int*err) {
+
+    int pid, i = 0;
+    int fd[2];
+
+    int save_in = dup(0), save_out = dup(1);
+
+    /*
+    printf("PIPE - length %d\n", length);
+
+    int j;
+
+    for (j = 0; j < length; j ++)
+        puts(data[j].data[0]);
+    */
+    while (i < length) {
+
+        pipe(fd);
+        pid = fork();
+
+        if (pid == 0) {
+
+            if (data[i].status[IN])
+                redirect_in(data[i].relocate_in);
+
+            if (data[i].status[OUT])
+                redirect_out(data[i].relocate_out);
+            if (data[i].status[ADD])
+                redirect_append(data[i].relocate_append);
+
+
+            if (i + 1 != length) {
+
+                dup2(fd[1], 1);
+            }
+            close(fd[1]);
+            close(fd[0]);
+            execvp(data[i].data[0], data[i].data);
+            (*err) = 1;
+            perror("Transporter - exec");
+            exit(EXIT_FAILURE);
+        } else {
+
+            int i;
+
+            for (i = 0; i < 256; i++) {
+                if (background_pid[i] == 0) {
+                    background_pid[i] = pid;
+                    break;
+                }
+            }
+
+            if (i < 256)
+                printf ("[%d] %d \n", (i+1), pid);
+            else
+                printf("Error - background process table overflow\n");
+        }
+        dup2(fd[0],0);
+        close(fd[1]);
+        close(fd[0]);
+
+        i++;
+    }
+
+    dup2(save_in, 0);
+    dup2(save_out, 1);
 
 }
