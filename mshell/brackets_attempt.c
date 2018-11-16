@@ -9,13 +9,15 @@
 #include <sys/types.h>
 #include <limits.h>
 
+char **commands_in_brackets = NULL;
+int brackets_am = 0;
+
 void redirect_in(char *path) {
 
     int fd = open(path, O_RDONLY);
     dup2(fd, 0);
     close(fd);
 }
-
 void redirect_out(char *path) {
 
     int fd = open(path,O_TRUNC | O_WRONLY | O_CREAT, 0777);
@@ -101,7 +103,7 @@ void mshell_init(void) {
     /* hub, controls the work of the program*/
 
     struct command *data = NULL;
-    int status[5] = {0, 0, 0, 0, 0};
+    int status[6] = {0, 0, 0, 0, 0, 0};
 
 
     // status[0] is error trigger
@@ -110,6 +112,7 @@ void mshell_init(void) {
     // status[3] is length of our build-like data implementation
     // build - like implementation lays in int *build
     // status[4] is background trigger
+    // status[5] is brackets trigger (dunno if we have 2 use)
     do {
 
         int k;
@@ -161,7 +164,7 @@ int mshell_getlex(char **buffer, int *status) {
     char buff;
     char *local_buffer = NULL;
     int local_len = 0;
-
+    int current_len = 0;
     (*buffer) = NULL;
 
     while(1) {
@@ -206,10 +209,35 @@ int mshell_getlex(char **buffer, int *status) {
                 }
                 break;
             case '(':
+
+                commands_in_brackets = (char **) realloc(commands_in_brackets, (brackets_am + 1) * sizeof(char *));
+
+                char * current = NULL;
+                current_len = 0;
+                buff = getchar();
+
+                while (buff != ')') {
+
+                    if (buff == '\n' || buff == EOF)
+                        return ERROR;
+
+                    if (current_len % we_add_len == 0)
+                        current = (char *) realloc(current, (current_len + we_add_len) * sizeof(char));
+
+                    current[current_len] = buff;
+                    current_len ++;
+
+                    buff = getchar();
+                }
+
+                commands_in_brackets[brackets_am] = current;
+                brackets_am ++;
+
                 return LP;
+
                 break;
             case ')':
-                return RP;
+                return RP;   // later implement a dead-end if we meet a RP
                 break;
             case EOF:
 
@@ -641,7 +669,7 @@ int mshell_cd(struct command data, int *err) {
         if (chdir(data.data[1]) != 0) {
             (*err) = 1;
             perror("mshell - cd");
-       }
+        }
     }
 
 
