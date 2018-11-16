@@ -9,8 +9,7 @@
 #include <sys/types.h>
 #include <limits.h>
 
-char **commands_in_brackets = NULL;
-int brackets_am = 0;
+int allowed_to_print = 0;
 
 void redirect_in(char *path) {
 
@@ -41,6 +40,7 @@ struct command {
     char *relocate_in;
     char *relocate_out;
     char *relocate_append;
+    char *brackets;
     int data_len;
     int status[OR_target + 1];
 };
@@ -81,6 +81,9 @@ int (*builtin_func[]) (struct command, int *) = {
 // "main" - literaly does nothing, just redirects input if we get file in
 int main(int argc, char **argv) {
 
+    int save_fd;
+    char *pid = (char *) malloc(10 * sizeof(char));
+
     signal(SIGINT, SIG_IGN);
 
     if (argc == 2) {
@@ -91,7 +94,25 @@ int main(int argc, char **argv) {
         }
     }
 
+    save_fd = open("system_useage_pidsave.txt", O_CREAT | O_RDONLY, 0777);
+    int successful_read = read(save_fd, pid, 10);
+
+    if (successful_read > 0) {
+        allowed_to_print = 0;
+    } else {
+        allowed_to_print = 1;
+    }
+
+    close(save_fd);
+
+    save_fd = open("system_useage_pidsave.txt", O_CREAT | O_WRONLY | O_TRUNC, 0777);
+    write(save_fd, "aaa", 3);
+    close(save_fd);
+
     mshell_init();
+
+    save_fd = open("system_useage_pidsave.txt", O_TRUNC);
+    close(save_fd);
 
     return 0;
 
@@ -103,7 +124,7 @@ void mshell_init(void) {
     /* hub, controls the work of the program*/
 
     struct command *data = NULL;
-    int status[6] = {0, 0, 0, 0, 0, 0};
+    int status[7] = {0, 0, 0, 0, 0, 0, 0};
 
 
     // status[0] is error trigger
@@ -113,21 +134,25 @@ void mshell_init(void) {
     // build - like implementation lays in int *build
     // status[4] is background trigger
     // status[5] is brackets trigger (dunno if we have 2 use)
+    // status[6] is EOF trigger - used to exit the fucking shell;
     do {
 
         int k;
 
-        for (k = 0; k < 5; k++)
+        for (k = 0; k < 6; k++)
             status[k] = 0;
 
-        char path[PATH_MAX];
+        if (allowed_to_print) {
 
-        getcwd(path, PATH_MAX);
+            char path[PATH_MAX];
 
-        printf("%s: ", path);
+            getcwd(path, PATH_MAX);
+
+            printf("%s: ", path);
+
+        }
 
         data = mshell_build(status);
-
         /*
         int i, j;
 
@@ -151,6 +176,9 @@ void mshell_init(void) {
             }
         } else
             status[1] = 1;
+
+        if (status[6])
+            status[1] = 0;
 
         data = NULL;
         mshell_background_help();
@@ -210,9 +238,6 @@ int mshell_getlex(char **buffer, int *status) {
                 break;
             case '(':
 
-                commands_in_brackets = (char **) realloc(commands_in_brackets, (brackets_am + 1) * sizeof(char *));
-
-                char * current = NULL;
                 current_len = 0;
                 buff = getchar();
 
@@ -222,17 +247,16 @@ int mshell_getlex(char **buffer, int *status) {
                         return ERROR;
 
                     if (current_len % we_add_len == 0)
-                        current = (char *) realloc(current, (current_len + we_add_len) * sizeof(char));
+                        local_buffer = (char *) realloc(local_buffer, (current_len + we_add_len) * sizeof(char));
 
-                    current[current_len] = buff;
+                    local_buffer[current_len] = buff;
                     current_len ++;
 
                     buff = getchar();
                 }
 
-                commands_in_brackets[brackets_am] = current;
-                brackets_am ++;
 
+                (*buffer) = local_buffer;
                 return LP;
 
                 break;
@@ -240,7 +264,7 @@ int mshell_getlex(char **buffer, int *status) {
                 return RP;   // later implement a dead-end if we meet a RP
                 break;
             case EOF:
-
+                status[6] = 1;
                 return EndFile;
                 break;
             case '#':
@@ -513,6 +537,38 @@ struct command *mshell_build(int *status) {
                 or_flag = 1;
                 break;
 
+            case RP:
+
+                exit_flag = 2;
+                printf("Error - command composition\n");
+                break;
+
+            case LP:
+
+                data = (struct command *) realloc(data, (commands_amount + 1) * sizeof(struct command));
+                data[commands_amount].relocate_in = NULL;
+                data[commands_amount].relocate_out = NULL;
+                data[commands_amount].relocate_append = NULL;
+                data[commands_amount].data = NULL;
+                data[commands_amount].brackets = buffer;
+
+                for (k = 0; k < enum_amount; k++)
+                    data[commands_amount].status[k] = 0;
+
+                data[commands_amount].status[LP] = 1;
+
+                if (and_flag) {
+                    and_flag = 0;
+                    data[commands_amount].status[AND_target] = 1;
+                }
+                if (or_flag) {
+                    or_flag = 0;
+                    data[commands_amount].status[OR_target] = 1;
+                }
+
+                commands_amount ++;
+
+                break;
 
             default:
                 break;
@@ -593,6 +649,9 @@ int mshell_forks(struct command data, int *err) {
     int pid;
     int stat;
 
+    int flag_safe;
+    char it_s_hold[2] = {'1', '1'};
+
     if ((pid = fork()) == 0) {
 
         signal(SIGINT, SIG_DFL);
@@ -611,10 +670,16 @@ int mshell_forks(struct command data, int *err) {
         execvp(data.data[0], data.data);
         perror("mshell - exec");
 
+        flag_safe = open("status_and_or.txt", O_CREAT | O_TRUNC | O_WRONLY, 0777);
+        write(flag_safe, it_s_hold, 1);
+        close(flag_safe);
+
         exit(EXIT_FAILURE);
 
     } else if (pid < 0) {
-        (*err) = 1;
+        flag_safe = open("status_and_or.txt", O_CREAT | O_TRUNC | O_WRONLY, 0777);
+        write(flag_safe, it_s_hold, 1);
+        close(flag_safe);
         perror("mshell - fork");
     } else {
 
@@ -622,8 +687,6 @@ int mshell_forks(struct command data, int *err) {
 
             waitpid(pid, &stat, WUNTRACED);
         } while (!WIFEXITED(stat) && !WIFSIGNALED(stat));
-
-        (*err) = !WIFEXITED(stat);
 
     }
 
@@ -636,6 +699,9 @@ int mshell_builtins_am() {
 }
 int mshell_cd(struct command data, int *err) {
 
+    int flag_safe;
+    char it_s_hold[2] = {'1', '1'};
+
     if (data.data[1] == NULL) {
 
 
@@ -644,7 +710,9 @@ int mshell_cd(struct command data, int *err) {
         data.data[1] = buffer;
 
         if (chdir(data.data[1]) != 0) {
-            (*err) = 1;
+            flag_safe = open("status_and_or.txt", O_CREAT | O_TRUNC | O_WRONLY, 0777);
+            write(flag_safe, it_s_hold, 1);
+            close(flag_safe);
             perror("mshell - cd");
         }
     } else {
@@ -667,7 +735,9 @@ int mshell_cd(struct command data, int *err) {
         }
 
         if (chdir(data.data[1]) != 0) {
-            (*err) = 1;
+            flag_safe = open("status_and_or.txt", O_CREAT | O_TRUNC | O_WRONLY, 0777);
+            write(flag_safe, it_s_hold, 1);
+            close(flag_safe);
             perror("mshell - cd");
         }
     }
@@ -693,12 +763,16 @@ int mshell_help(struct command data, int *err) {
     return 1;
 }
 
+//transporter
 void mshell_conv(struct command *data, int length, int*err) {
 
     int pid, i = 0;
     int fd[2];
 
     int save_in = dup(0), save_out = dup(1);
+
+    int flag_safe;
+    char it_s_hold[2] = {'1', '1'};
 
     /*
     printf("PIPE - length %d\n", length);
@@ -731,7 +805,11 @@ void mshell_conv(struct command *data, int length, int*err) {
             close(fd[1]);
             close(fd[0]);
             execvp(data[i].data[0], data[i].data);
-            (*err) = 1;
+
+            flag_safe = open("status_and_or.txt", O_CREAT | O_TRUNC | O_WRONLY, 0777);
+            write(flag_safe, it_s_hold, 1);
+            close(flag_safe);
+
             perror("Transporter - exec");
             exit(EXIT_FAILURE);
         }
@@ -749,6 +827,7 @@ void mshell_conv(struct command *data, int length, int*err) {
 
 }
 
+//hub for not background-running function
 int and_execute(struct command *data, int *status) {
 
     //we have a structure with:
@@ -770,16 +849,33 @@ int and_execute(struct command *data, int *status) {
     struct command *transporter = NULL;
     int pipe_len;
     int whynot;
+    int pid, stat;
+    char it_s_for_flag[2];
+    int flag_safe;
+    int successful_read;
 
+    flag_safe = open("status_and_or.txt", O_CREAT | O_TRUNC, 0777);
+    close(flag_safe);
 
     do {
 
-        and_flag = 0;
-        or_flag = 0;
         and_succes = 0;
         or_succes = 0;
         current = data[iter];
         whynot = 1;
+
+        flag_safe = open("status_and_or.txt", O_RDONLY, 0777);
+        successful_read = read(flag_safe, (it_s_for_flag + 1), 1);
+
+        if (successful_read) {
+            execution_failed = 1;
+        } else {
+            execution_failed = 0;
+        }
+        close(flag_safe);
+
+        flag_safe = open("status_and_or.txt", O_TRUNC);
+        close(flag_safe);
 
         if (current.status[AND_target]) {
 
@@ -791,89 +887,110 @@ int and_execute(struct command *data, int *status) {
             or_succes = execution_failed;
         }
 
-        if (current.status[AND])
-            and_flag = 1;
+        if (current.status[LP]) {
+            if ((current.status[AND_target] && and_succes) || (current.status[OR_target] && or_succes) ||
+                (!current.status[AND_target] && !current.status[OR_target])) {
 
-        if (current.status[OR])
-            or_flag = 1;
-
-        if ((current.status[AND_target] && and_succes) || (current.status[OR_target] && or_succes) || (!current.status[AND_target] && !current.status[OR_target])) {
-
-            if (current.status[PIPE]) {
-
-                transporter = (struct command *) malloc(sizeof(struct command));
-                pipe_len = 1;
-                whynot = 1;
-                transporter[0] = current;
-
+                int fd = open("system_useage_file.txt", O_CREAT | O_WRONLY | O_TRUNC, 0777);
+                write(fd, current.brackets, strlen(current.brackets));
+                close(fd);
                 iter++;
-                while ((iter < status[2]) && whynot) {
 
-                    if (data[iter].status[AND]) {
-                        and_flag = 1;
-                        whynot = 0;
-                    }
-                    if (data[iter].status[OR]) {
-                        or_flag = 1;
-                        whynot = 0;
-                    }
+                pid = fork();
 
-                    if (data[iter].status[PIPE]) {
-                        transporter = (struct command *) realloc(transporter,
-                                                                 (pipe_len + 1) * sizeof(struct command));
-                        transporter[pipe_len] = data[iter];
-                        pipe_len++;
+                if (pid == 0) {
+                    execlp("./shell", "./shell", "system_useage_file.txt", NULL);
+                    perror("brackets - exec");
 
-                        iter ++;
+                    exit(EXIT_FAILURE);
+                } else if (pid < 0) {
+                    perror("brackets - fork");
+                } else {
 
-                    } else {
-                        transporter = (struct command *) realloc(transporter,
-                                                                 (pipe_len + 1) * sizeof(struct command));
-                        transporter[pipe_len] = data[iter];
-                        pipe_len++;
-                        whynot = 0;
-                        iter ++;
-                    }
+                    do {
+
+                        waitpid(pid, &stat, WUNTRACED);
+                    } while (!WIFEXITED(stat) && !WIFSIGNALED(stat));
                 }
-
-                mshell_conv(transporter, pipe_len, &execution_failed);
-
-                free(transporter);
             } else {
-
-                builtin_flag = 0;
-                for (j = 0; j < mshell_builtins_am(); j++) {
-                    if (strcmp(current.data[0], builtin_str[j]) == 0) {
-                        we_exit = (*builtin_func[j])(current, &execution_failed);
-                        builtin_flag = 1;
-                    }
-                }
-
-                if (!builtin_flag)
-                    we_exit = mshell_forks(current, &execution_failed);
-
+                iter++;
             }
         } else {
+            if ((current.status[AND_target] && and_succes) || (current.status[OR_target] && or_succes) ||
+                (!current.status[AND_target] && !current.status[OR_target])) {
 
-            while (data[iter].status[PIPE])
+                if (current.status[PIPE]) {
+
+                    transporter = (struct command *) malloc(sizeof(struct command));
+                    pipe_len = 1;
+                    whynot = 1;
+                    transporter[0] = current;
+
+                    iter++;
+                    while ((iter < status[2]) && whynot) {
+
+                        if (data[iter].status[AND]) {
+                            and_flag = 1;
+                            whynot = 0;
+                        }
+                        if (data[iter].status[OR]) {
+                            or_flag = 1;
+                            whynot = 0;
+                        }
+
+                        if (data[iter].status[PIPE]) {
+                            transporter = (struct command *) realloc(transporter,
+                                                                     (pipe_len + 1) * sizeof(struct command));
+                            transporter[pipe_len] = data[iter];
+                            pipe_len++;
+
+                            iter++;
+
+                        } else {
+                            transporter = (struct command *) realloc(transporter,
+                                                                     (pipe_len + 1) * sizeof(struct command));
+                            transporter[pipe_len] = data[iter];
+                            pipe_len++;
+                            whynot = 0;
+                            iter++;
+                        }
+                    }
+
+                    mshell_conv(transporter, pipe_len, &execution_failed);
+
+                    free(transporter);
+                } else {
+
+                    builtin_flag = 0;
+                    for (j = 0; j < mshell_builtins_am(); j++) {
+                        if (strcmp(current.data[0], builtin_str[j]) == 0) {
+                            we_exit = (*builtin_func[j])(current, &execution_failed);
+                            builtin_flag = 1;
+                        }
+                    }
+
+                    if (!builtin_flag)
+                        we_exit = mshell_forks(current, &execution_failed);
+
+                }
+            } else {
+
+                while (data[iter].status[PIPE])
+                    iter++;
+            }
+
+            if (whynot) {
                 iter++;
-        }
+            }
 
-        if (whynot) {
-            iter++;
         }
-
-        if (and_flag || or_flag) {
-        } else {
-            execution_failed = 0;
-        }
-
     } while (iter < status[2] && we_exit);
 
     return we_exit;
 
 }
 
+//background implementation
 void background_execute(struct command *data, int *status) {
     //we have a structure with:
     //set of lines char **data
@@ -904,6 +1021,10 @@ void background_execute(struct command *data, int *status) {
     int pipe_len;
     int whynot;
 
+    int flag_safe;
+    int successful_read;
+    char it_s_for_flag[2];
+
 
     do {
 
@@ -913,6 +1034,19 @@ void background_execute(struct command *data, int *status) {
         or_succes = 0;
         current = data[iter];
         whynot = 1;
+
+        flag_safe = open("status_and_or.txt", O_RDONLY, 0777);
+        successful_read = read(flag_safe, (it_s_for_flag + 1), 1);
+
+        if (successful_read) {
+            execution_failed = 1;
+        } else {
+            execution_failed = 0;
+        }
+        close(flag_safe);
+
+        flag_safe = open("status_and_or.txt", O_TRUNC);
+        close(flag_safe);
 
         if (current.status[AND_target]) {
 
@@ -995,19 +1129,15 @@ void background_execute(struct command *data, int *status) {
             iter++;
         }
 
-        if (and_flag || or_flag) {
-        } else {
-            execution_failed = 0;
-        }
-
     } while (iter < status[2] && we_exit);
 
     dup2(fd_hold, 0);
 }
-
 int mshell_back_forks(struct command data, int *err) {
 
     int pid;
+    int flag_safe;
+    char it_s_hold[2] = {'1', '1'};
 
     if ((pid = fork()) == 0) {
 
@@ -1023,12 +1153,17 @@ int mshell_back_forks(struct command data, int *err) {
         }
 
         execvp(data.data[0], data.data);
+        flag_safe = open("status_and_or.txt", O_CREAT | O_TRUNC | O_WRONLY, 0777);
+        write(flag_safe, it_s_hold, 1);
+        close(flag_safe);
         perror("mshell - exec");
 
         exit(EXIT_FAILURE);
 
     } else if (pid < 0) {
-        (*err) = 1;
+        flag_safe = open("status_and_or.txt", O_CREAT | O_TRUNC | O_WRONLY, 0777);
+        write(flag_safe, it_s_hold, 1);
+        close(flag_safe);
         perror("mshell - fork");
     } else {
 
@@ -1057,6 +1192,9 @@ void mshell_back_conv(struct command *data, int length, int*err) {
     int fd[2];
 
     int save_in = dup(0), save_out = dup(1);
+
+    int flag_safe;
+    char it_s_hold[2] = {'1', '1'};
 
     /*
     printf("PIPE - length %d\n", length);
@@ -1089,7 +1227,11 @@ void mshell_back_conv(struct command *data, int length, int*err) {
             close(fd[1]);
             close(fd[0]);
             execvp(data[i].data[0], data[i].data);
-            (*err) = 1;
+
+            flag_safe = open("status_and_or.txt", O_CREAT | O_TRUNC | O_WRONLY, 0777);
+            write(flag_safe, it_s_hold, 1);
+            close(flag_safe);
+
             perror("Transporter - exec");
             exit(EXIT_FAILURE);
         } else {
