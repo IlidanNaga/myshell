@@ -71,6 +71,9 @@ void background_execute(struct command *data, int *status);
 int mshell_back_forks(struct command data, int *err);
 void mshell_back_conv(struct command *data, int length, int*err);
 
+
+void free_commands(struct command *data, int commands_amount);
+
 char *builtin_str[] = {
         "cd", "exit","help"
 };
@@ -117,7 +120,6 @@ int main(int argc, char **argv) {
     return 0;
 
 }
-
 
 #define we_add_len 20                   // const used to increase buffer size
 void mshell_init(void) {
@@ -181,6 +183,7 @@ void mshell_init(void) {
             status[1] = 0;
 
         data = NULL;
+
         mshell_background_help();
     } while (status[1]);
 
@@ -551,6 +554,7 @@ struct command *mshell_build(int *status) {
                 data[commands_amount].relocate_append = NULL;
                 data[commands_amount].data = NULL;
                 data[commands_amount].brackets = buffer;
+                data[commands_amount].data_len = 0;
 
                 for (k = 0; k < enum_amount; k++)
                     data[commands_amount].status[k] = 0;
@@ -1260,4 +1264,24 @@ void mshell_back_conv(struct command *data, int length, int*err) {
     dup2(save_in, 0);
     dup2(save_out, 1);
 
+}
+
+void free_commands(struct command *data, int commands_amount) {
+
+    struct command current;
+    int i, j;
+
+    for (i = 0; i < commands_amount; i++) {
+        current = data[i];
+
+        free(current.relocate_append);
+        free(current.relocate_out);
+        free(current.relocate_in);
+
+        for (j = 0; j < current.data_len; j ++ ) {
+            free(current.data[j]);
+        }
+        if (current.data_len != 0)
+            free(current.data);
+    }
 }
