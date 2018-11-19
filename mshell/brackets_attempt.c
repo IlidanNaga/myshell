@@ -198,6 +198,8 @@ int mshell_getlex(char **buffer, int *status) {
     int current_len = 0;
     (*buffer) = NULL;
 
+    int flag = 0;
+
     while(1) {
 
         buff = getchar();
@@ -243,8 +245,9 @@ int mshell_getlex(char **buffer, int *status) {
 
                 current_len = 0;
                 buff = getchar();
+                flag ++;
 
-                while (buff != ')') {
+                while (flag) {
 
                     if (buff == '\n' || buff == EOF)
                         return ERROR;
@@ -256,6 +259,12 @@ int mshell_getlex(char **buffer, int *status) {
                     current_len ++;
 
                     buff = getchar();
+
+                    if (buff == '(')
+                        flag ++;
+                    if (buff == ')')
+                        flag --;
+
                 }
 
 
