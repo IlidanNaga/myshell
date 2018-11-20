@@ -137,6 +137,7 @@ void mshell_init(void) {
     // status[4] is background trigger
     // status[5] is brackets trigger (dunno if we have 2 use)
     // status[6] is EOF trigger - used to exit the fucking shell;
+
     do {
 
         int k;
@@ -357,6 +358,14 @@ struct command *mshell_build(int *status) {
     int and_flag = 0;
     int or_flag = 0;
 
+    char *buffer_in = NULL;
+    char *buffer_out = NULL;
+    char *buffer_append = NULL;
+
+    int in_flag = 0;
+    int out_flag = 0;
+    int append_flag = 0;
+
     do {
 
 
@@ -387,6 +396,25 @@ struct command *mshell_build(int *status) {
                 command_len ++;
 
                 used_new = 0;
+
+                if (in_flag) {
+                    in_flag = 0;
+                    data[commands_amount].relocate_in = buffer_in;
+                    data[commands_amount].status[IN] = 1;
+                }
+
+                if (out_flag) {
+                    out_flag = 0;
+                    data[commands_amount].relocate_out = buffer_out;
+                    data[commands_amount].status[OUT] = 1;
+                }
+
+                if (append_flag) {
+                    append_flag = 0;
+                    data[commands_amount].relocate_append = buffer_append;
+                    data[commands_amount].status[ADD] = 1;
+                }
+
                 do {
                     buffer = NULL;
 
@@ -511,17 +539,69 @@ struct command *mshell_build(int *status) {
 
             case IN:
 
+                if (!in_flag) {
+                    in_flag = 1;
+                    buffer = NULL;
+
+                    new_stat = mshell_getlex(&buffer, status);
+
+                    if (new_stat != WORD) {
+                        exit_flag = 2;
+                        printf("Error - command composition\n");
+                        break;
+                    }
+
+                    buffer_in = buffer;
+                    break;
+
+                }
+
                 exit_flag = 2;
                 printf("Error - command composition\n");
                 break;
 
             case OUT:
 
+                if (!out_flag) {
+                    out_flag = 1;
+                    buffer = NULL;
+
+                    new_stat = mshell_getlex(&buffer, status);
+
+                    if (new_stat != WORD) {
+                        exit_flag = 2;
+                        printf("Error - command composition\n");
+                        break;
+                    }
+
+                    buffer_out = buffer;
+                    break;
+
+                }
+
                 exit_flag = 2;
                 printf("Error - command composition\n");
                 break;
 
             case ADD:
+
+
+                if (!append_flag) {
+                    append_flag = 1;
+                    buffer = NULL;
+
+                    new_stat = mshell_getlex(&buffer, status);
+
+                    if (new_stat != WORD) {
+                        exit_flag = 2;
+                        printf("Error - command composition\n");
+                        break;
+                    }
+
+                    buffer_append = buffer;
+                    break;
+
+                }
 
                 exit_flag = 2;
                 printf("Error - command composition\n");
