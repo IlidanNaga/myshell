@@ -10,6 +10,11 @@
 #include <limits.h>
 
 int allowed_to_print = 0;
+char ideal[PATH_MAX];
+int length_ideal = 0;
+
+int when_entered;
+int restore;
 
 void redirect_in(char *path) {
 
@@ -50,6 +55,8 @@ int background_amount = 0;
 
 void mshell_init(void);                              // function which makes everything work
 int mshell_getlex(char **buffer, int * status);      // returning lexeme type, in **buffer - string of inner data
+
+
 int mshell_execute(char **data, int *status);        // working with data we got in _getwords, must be splitted into xtra's
 
 int mshell_forks(struct command data, int *err);                       // working with data - fork way
@@ -71,7 +78,6 @@ void background_execute(struct command *data, int *status);
 int mshell_back_forks(struct command data, int *err);
 void mshell_back_conv(struct command *data, int length, int*err);
 
-
 void free_commands(struct command *data, int commands_amount);
 
 char *builtin_str[] = {
@@ -85,7 +91,7 @@ int (*builtin_func[]) (struct command, int *) = {
 int main(int argc, char **argv) {
 
     int save_fd;
-    char *pid = (char *) malloc(10 * sizeof(char));
+    char *checker = (char *) malloc(10 * sizeof(char));
 
     signal(SIGINT, SIG_IGN);
 
@@ -98,7 +104,7 @@ int main(int argc, char **argv) {
     }
 
     save_fd = open("system_useage_pidsave.txt", O_CREAT | O_RDONLY, 0777);
-    int successful_read = read(save_fd, pid, 10);
+    int successful_read = read(save_fd, checker, 10);
 
     if (successful_read > 0) {
         allowed_to_print = 0;
@@ -111,6 +117,48 @@ int main(int argc, char **argv) {
     save_fd = open("system_useage_pidsave.txt", O_CREAT | O_WRONLY | O_TRUNC, 0777);
     write(save_fd, "aaa", 3);
     close(save_fd);
+
+
+
+    int pid = fork(), stat;
+
+    if (pid) {
+
+        do {
+
+            waitpid(pid, &stat, WUNTRACED);
+        } while (!WIFEXITED(stat) && !WIFSIGNALED(stat));
+
+        char arr[PATH_MAX];
+        int fd = open("asdf.txt", O_RDONLY);
+
+        arr[0] = '/';
+        arr[1] = 'h';
+        arr[2] = 'o';
+        arr[3] = 'm';
+        arr[4] = 'e';
+        arr[5] = '/';
+        read(fd, arr+6, PATH_MAX);
+        close(fd);
+
+        arr[strlen(arr) - 1] = ' ';
+
+        int i;
+
+        for (i = 0; i < strlen(arr) - 1; i++)
+            ideal[i] = arr[i];
+
+        length_ideal = strlen(arr) - 1;
+
+
+    } else {
+
+        int fd = open("asdf.txt", O_CREAT | O_WRONLY | O_TRUNC, 0777);
+        dup2(fd, 1);
+        close(fd);
+        execlp("whoami", "whoami", NULL);
+        perror("exec");
+    }
 
     mshell_init();
 
@@ -127,7 +175,7 @@ void mshell_init(void) {
 
     struct command *data = NULL;
     int status[7] = {0, 0, 0, 0, 0, 0, 0};
-
+    int flag;
 
     // status[0] is error trigger
     // status[1] is loop trigger
@@ -151,7 +199,24 @@ void mshell_init(void) {
 
             getcwd(path, PATH_MAX);
 
-            printf("%s: ", path);
+            flag = 1;
+
+            for (k = 0; k < length_ideal; k++) {
+                if (path[k] != ideal[k])
+                    flag = 0;
+            }
+
+            if (!flag) {
+                printf("%s$ ", path);
+            } else {
+                char path1[PATH_MAX];
+                path1[0] = '~';
+
+                for (k = 1; k < PATH_MAX - length_ideal; k++)
+                    path1[k] = path[length_ideal - 1 + k];
+
+                printf("%s$ ", path1);
+            }
 
         }
 
@@ -169,6 +234,8 @@ void mshell_init(void) {
                 puts(data[i].data[j]);
         }
         */
+
+        printf("%d\n", getpid());
 
         if (!status[0]) {
             if (!status[4]) {
@@ -273,6 +340,11 @@ int mshell_getlex(char **buffer, int *status) {
                         flag --;
 
                 }
+
+                if (current_len % we_add_len == 0)
+                    local_buffer = (char *) realloc(local_buffer, (current_len + 1) * sizeof(char));
+
+                local_buffer[current_len] = EOF;
 
 
                 (*buffer) = local_buffer;
@@ -807,10 +879,7 @@ int mshell_cd(struct command data, int *err) {
 
     if (data.data[1] == NULL) {
 
-
-        char *buffer = (char *) malloc(1024 * sizeof(char));
-        memmove(buffer, "/home/ilidannaga", 16);
-        data.data[1] = buffer;
+        data.data[1] = ideal;
 
         if (chdir(data.data[1]) != 0) {
             flag_safe = open("status_and_or.txt", O_CREAT | O_TRUNC | O_WRONLY, 0777);
@@ -822,14 +891,15 @@ int mshell_cd(struct command data, int *err) {
 
         if (data.data[1][0] == '~') {
 
-            char *buffer = (char *) malloc(1024 * sizeof(char));
-
-            memmove(buffer, "/home/ilidannaga", 16);
-
+            char buffer[PATH_MAX];
             int i;
 
+            for (i = 0; i < length_ideal; i++) {
+                buffer[i] = ideal[i];
+            }
+
             for (i = 1; i <= strlen(data.data[1]); i++) {
-                buffer[15 + i] = data.data[1][i];
+                buffer[length_ideal - 1 + i] = data.data[1][i];
             }
 
             free(data.data[1]);
@@ -869,7 +939,7 @@ int mshell_help(struct command data, int *err) {
 //transporter
 void mshell_conv(struct command *data, int length, int*err) {
 
-    int pid, i = 0;
+    int pid, opid, i = 0, stat;
     int fd[2];
 
     int save_in = dup(0), save_out = dup(1);
@@ -907,14 +977,40 @@ void mshell_conv(struct command *data, int length, int*err) {
             }
             close(fd[1]);
             close(fd[0]);
-            execvp(data[i].data[0], data[i].data);
 
-            flag_safe = open("status_and_or.txt", O_CREAT | O_TRUNC | O_WRONLY, 0777);
-            write(flag_safe, it_s_hold, 1);
-            close(flag_safe);
+            if (data[i].status[LP]) {
+                int fdir = open("system_useage_file.txt", O_CREAT | O_WRONLY | O_TRUNC, 0777);
+                write(fdir, data[i].brackets, strlen(data[i].brackets));
+                close(fdir);
 
-            perror("Transporter - exec");
-            exit(EXIT_FAILURE);
+                opid = fork();
+
+                if (opid == 0) {
+                    execlp("./shell", "./shell", "system_useage_file.txt", NULL);
+                    perror("brackets - exec");
+
+                    exit(EXIT_FAILURE);
+                } else if (opid < 0) {
+                    perror("brackets - fork");
+                } else {
+
+                    do {
+
+                        waitpid(pid, &stat, WUNTRACED);
+                    } while (!WIFEXITED(stat) && !WIFSIGNALED(stat));
+
+                }
+            } else {
+                execvp(data[i].data[0], data[i].data);
+
+                flag_safe = open("status_and_or.txt", O_CREAT | O_TRUNC | O_WRONLY, 0777);
+                write(flag_safe, it_s_hold, 1);
+                close(flag_safe);
+
+                perror("Transporter - exec");
+                exit(EXIT_FAILURE);
+            }
+
         }
         dup2(fd[0],0);
         close(fd[1]);
@@ -959,6 +1055,8 @@ int and_execute(struct command *data, int *status) {
 
     flag_safe = open("status_and_or.txt", O_CREAT | O_TRUNC, 0777);
     close(flag_safe);
+
+    dup2(when_entered, 0);
 
     do {
 
@@ -1087,6 +1185,8 @@ int and_execute(struct command *data, int *status) {
             }
 
         }
+
+
     } while (iter < status[2] && we_exit);
 
     return we_exit;
