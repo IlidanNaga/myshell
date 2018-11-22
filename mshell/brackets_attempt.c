@@ -235,8 +235,6 @@ void mshell_init(void) {
         }
         */
 
-        printf("%d\n", getpid());
-
         if (!status[0]) {
             if (!status[4]) {
                 status[1] = and_execute(data, status);
@@ -939,7 +937,7 @@ int mshell_help(struct command data, int *err) {
 //transporter
 void mshell_conv(struct command *data, int length, int*err) {
 
-    int pid, opid, i = 0, stat;
+    int pid, i = 0;
     int fd[2];
 
     int save_in = dup(0), save_out = dup(1);
@@ -947,14 +945,6 @@ void mshell_conv(struct command *data, int length, int*err) {
     int flag_safe;
     char it_s_hold[2] = {'1', '1'};
 
-    /*
-    printf("PIPE - length %d\n", length);
-
-    int j;
-
-    for (j = 0; j < length; j ++)
-        puts(data[j].data[0]);
-    */
     while (i < length) {
 
         pipe(fd);
@@ -978,39 +968,14 @@ void mshell_conv(struct command *data, int length, int*err) {
             close(fd[1]);
             close(fd[0]);
 
-            if (data[i].status[LP]) {
-                int fdir = open("system_useage_file.txt", O_CREAT | O_WRONLY | O_TRUNC, 0777);
-                write(fdir, data[i].brackets, strlen(data[i].brackets));
-                close(fdir);
+            execvp(data[i].data[0], data[i].data);
 
-                opid = fork();
+            flag_safe = open("status_and_or.txt", O_CREAT | O_TRUNC | O_WRONLY, 0777);
+            write(flag_safe, it_s_hold, 1);
+            close(flag_safe);
 
-                if (opid == 0) {
-                    execlp("./shell", "./shell", "system_useage_file.txt", NULL);
-                    perror("brackets - exec");
-
-                    exit(EXIT_FAILURE);
-                } else if (opid < 0) {
-                    perror("brackets - fork");
-                } else {
-
-                    do {
-
-                        waitpid(pid, &stat, WUNTRACED);
-                    } while (!WIFEXITED(stat) && !WIFSIGNALED(stat));
-
-                }
-            } else {
-                execvp(data[i].data[0], data[i].data);
-
-                flag_safe = open("status_and_or.txt", O_CREAT | O_TRUNC | O_WRONLY, 0777);
-                write(flag_safe, it_s_hold, 1);
-                close(flag_safe);
-
-                perror("Transporter - exec");
-                exit(EXIT_FAILURE);
-            }
-
+            perror("Transporter - exec");
+            exit(EXIT_FAILURE);
         }
         dup2(fd[0],0);
         close(fd[1]);
