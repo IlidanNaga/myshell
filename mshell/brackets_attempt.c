@@ -1239,14 +1239,55 @@ int and_execute(struct command *data, int *status) {
             or_succes = execution_failed;
         }
 
-        if (current.status[LP]) {
-            if ((current.status[AND_target] && and_succes) || (current.status[OR_target] && or_succes) ||
-                (!current.status[AND_target] && !current.status[OR_target])) {
+
+        if ((current.status[AND_target] && and_succes) || (current.status[OR_target] && or_succes) ||
+            (!current.status[AND_target] && !current.status[OR_target])) {
+
+            if (current.status[PIPE]) {
+
+                transporter = (struct command *) malloc(sizeof(struct command));
+                pipe_len = 1;
+                whynot = 1;
+                transporter[0] = current;
+
+                iter++;
+                while ((iter < status[2]) && whynot) {
+
+                    if (data[iter].status[AND]) {
+                        and_flag = 1;
+                        whynot = 0;
+                    }
+                    if (data[iter].status[OR]) {
+                        or_flag = 1;
+                        whynot = 0;
+                    }
+
+                    if (data[iter].status[PIPE]) {
+                        transporter = (struct command *) realloc(transporter,
+                                                                 (pipe_len + 1) * sizeof(struct command));
+                        transporter[pipe_len] = data[iter];
+                        pipe_len++;
+
+                        iter++;
+
+                    } else {
+                        transporter = (struct command *) realloc(transporter,
+                                                                 (pipe_len + 1) * sizeof(struct command));
+                        transporter[pipe_len] = data[iter];
+                        pipe_len++;
+                        whynot = 0;
+                        iter++;
+                    }
+                }
+
+                mshell_conv(transporter, pipe_len, &execution_failed);
+
+                free(transporter);
+            } else if (current.status[LP]) {
 
                 int fd = open("system_useage_file.txt", O_CREAT | O_WRONLY | O_TRUNC, 0777);
                 write(fd, current.brackets, strlen(current.brackets));
                 close(fd);
-                iter++;
 
                 pid = fork();
 
@@ -1265,78 +1306,28 @@ int and_execute(struct command *data, int *status) {
                     } while (!WIFEXITED(stat) && !WIFSIGNALED(stat));
                 }
             } else {
-                iter++;
+
+                builtin_flag = 0;
+                for (j = 0; j < mshell_builtins_am(); j++) {
+                    if (strcmp(current.data[0], builtin_str[j]) == 0) {
+                        we_exit = (*builtin_func[j])(current, &execution_failed);
+                        builtin_flag = 1;
+                    }
+                }
+
+                if (!builtin_flag)
+                    we_exit = mshell_forks(current, &execution_failed);
+
             }
         } else {
-            if ((current.status[AND_target] && and_succes) || (current.status[OR_target] && or_succes) ||
-                (!current.status[AND_target] && !current.status[OR_target])) {
 
-                if (current.status[PIPE]) {
-
-                    transporter = (struct command *) malloc(sizeof(struct command));
-                    pipe_len = 1;
-                    whynot = 1;
-                    transporter[0] = current;
-
-                    iter++;
-                    while ((iter < status[2]) && whynot) {
-
-                        if (data[iter].status[AND]) {
-                            and_flag = 1;
-                            whynot = 0;
-                        }
-                        if (data[iter].status[OR]) {
-                            or_flag = 1;
-                            whynot = 0;
-                        }
-
-                        if (data[iter].status[PIPE]) {
-                            transporter = (struct command *) realloc(transporter,
-                                                                     (pipe_len + 1) * sizeof(struct command));
-                            transporter[pipe_len] = data[iter];
-                            pipe_len++;
-
-                            iter++;
-
-                        } else {
-                            transporter = (struct command *) realloc(transporter,
-                                                                     (pipe_len + 1) * sizeof(struct command));
-                            transporter[pipe_len] = data[iter];
-                            pipe_len++;
-                            whynot = 0;
-                            iter++;
-                        }
-                    }
-
-                    mshell_conv(transporter, pipe_len, &execution_failed);
-
-                    free(transporter);
-                } else {
-
-                    builtin_flag = 0;
-                    for (j = 0; j < mshell_builtins_am(); j++) {
-                        if (strcmp(current.data[0], builtin_str[j]) == 0) {
-                            we_exit = (*builtin_func[j])(current, &execution_failed);
-                            builtin_flag = 1;
-                        }
-                    }
-
-                    if (!builtin_flag)
-                        we_exit = mshell_forks(current, &execution_failed);
-
-                }
-            } else {
-
-                while (data[iter].status[PIPE])
-                    iter++;
-            }
-
-            if (whynot) {
+            while (data[iter].status[PIPE])
                 iter++;
-            }
 
+            iter ++;
         }
 
+        iter ++;
 
     } while (iter < status[2] && we_exit);
 
