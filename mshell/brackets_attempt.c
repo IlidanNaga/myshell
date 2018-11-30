@@ -12,6 +12,8 @@
 int allowed_to_print = 0;
 char ideal[PATH_MAX];
 int length_ideal = 0;
+int in;
+int in_file = 0;
 
 int when_entered;
 int restore;
@@ -55,7 +57,11 @@ int background_amount = 0;
 
 void mshell_init(void);                              // function which makes everything work
 int mshell_getlex(char **buffer, int * status);      // returning lexeme type, in **buffer - string of inner data
+int mshell_getlex_file(char **buffer, int *status);  // returning lexeme type, in **buffer - string of inner data;
 
+int (*getlex_types[]) (char **buffer, int *status) = {
+    &mshell_getlex, &mshell_getlex_file
+};
 
 int mshell_execute(char **data, int *status);        // working with data we got in _getwords, must be splitted into xtra's
 
@@ -90,24 +96,24 @@ int (*builtin_func[]) (struct command, int *) = {
 // "main" - literaly does nothing, just redirects input if we get file in
 int main(int argc, char **argv) {
 
-    int save_fd;
-    char *checker = (char *) malloc(10 * sizeof(char));
-
     signal(SIGINT, SIG_IGN);
 
-    if (argc == 2) {
-        int fd = open(argv[1], O_RDONLY);
-        if (fd != -1) {
-            dup2(fd, 0);
-            close(fd);
-        }
+    if (argc >= 2) {
+        in = open(argv[1], O_RDONLY);
+        in_file = 1;
+        allowed_to_print = 0;
+    } else {
+        allowed_to_print = 1;
     }
 
+    /*
+
     save_fd = open("system_useage_pidsave.txt", O_CREAT | O_RDONLY, 0777);
-    int successful_read = read(save_fd, checker, 10);
+    int successful_read = read(save_fd, &read_fd, sizeof(int));
 
     if (successful_read > 0) {
-        allowed_to_print = 0;
+        if (getppid() == read_fd)
+            allowed_to_print = 0;
     } else {
         allowed_to_print = 1;
     }
@@ -115,10 +121,11 @@ int main(int argc, char **argv) {
     close(save_fd);
 
     save_fd = open("system_useage_pidsave.txt", O_CREAT | O_WRONLY | O_TRUNC, 0777);
-    write(save_fd, "aaa", 3);
+    int writing = getpid();
+    write(save_fd, &writing, sizeof(int));
     close(save_fd);
 
-
+    */
 
     int pid = fork(), stat;
 
@@ -162,8 +169,12 @@ int main(int argc, char **argv) {
 
     mshell_init();
 
+    /*
+
     save_fd = open("system_useage_pidsave.txt", O_TRUNC);
     close(save_fd);
+
+    */
 
     return 0;
 
@@ -245,17 +256,186 @@ void mshell_init(void) {
         } else
             status[1] = 1;
 
-        if (status[6]) {
-            status[1] = 0;
-            printf("\n");
-        }
         data = NULL;
 
         mshell_background_help();
-    } while (status[1]);
+    } while (status[1]  && !status[6]);
 
 }
 // getting lexemes
+
+int mshell_getlex_file(char **buffer, int *status) {
+
+    char buff;
+    char *local_buffer = NULL;
+    int local_len = 0;
+    int current_len = 0;
+    (*buffer) = NULL;
+    int flag = 0;
+    int read_no;
+
+    while(1) {
+
+
+        read_no = read(in, &buff, 1);
+
+        if (read_no < 1) {
+            status[6] = 1;
+            return END;
+        }
+
+        switch (buff) {
+
+            case '\033':
+
+                printf("BEEP\n");
+
+                break;
+
+            case '|':
+
+                read_no = read(in, &buff, 1);
+
+                if (read_no < 1) {
+                    status[6] = 1;
+                    return ERROR;
+                }
+
+                if (buff == '|')
+                    return OR;
+
+                lseek(in, -1, SEEK_CUR);
+                return PIPE;
+            case ';':
+
+                return END;
+            case '<':
+
+                return IN;
+            case '>':
+
+                read(in, &buff, 1);
+
+                if (buff == '>')
+                    return ADD;
+                else {
+                    lseek(in, -1, SEEK_CUR);
+                    return OUT;
+                }
+            case '&':
+
+                read(in, &buff, 1);
+                if (buff == '&')
+                    return AND;
+                else {
+                    lseek(in, -1, SEEK_CUR);
+                    return BACK;
+                }
+                break;
+            case '(':
+
+                current_len = 0;
+
+                read_no = read(in, &buff, 1);
+
+                if (read_no < 1) {
+                    status[6] = 1;
+                    return ERROR;
+                }
+
+                flag ++;
+
+                while (flag) {
+
+                    if (buff == '\n')
+                        return ERROR;
+
+
+                    if (current_len % we_add_len == 0)
+                        local_buffer = (char *) realloc(local_buffer, (current_len + we_add_len) * sizeof(char));
+
+                    local_buffer[current_len] = buff;
+                    current_len ++;
+
+                    read(in, &buff, 1);
+
+                    if (buff == '(')
+                        flag ++;
+                    if (buff == ')')
+                        flag --;
+
+                }
+
+                if (current_len % we_add_len == 0)
+                    local_buffer = (char *) realloc(local_buffer, (current_len + 1) * sizeof(char));
+
+                local_buffer[current_len] = EOF;
+
+
+                (*buffer) = local_buffer;
+                return LP;
+
+                break;
+            case ')':
+                return RP;   // later implement a dead-end if we meet a RP
+                break;
+            case EOF:
+                status[6] = 1;
+                return EndFile;
+                break;
+            case '#':
+                break;
+            case ' ':
+                break;
+            case '\n':
+
+                return END;
+                break;
+            case '"':
+
+                read(in, &buff, 1);
+
+                while (buff != '"') {
+
+                    if (buff == '\n' || buff == EOF)
+                        return ERROR;
+
+                    if (local_len % we_add_len == 0)
+                        local_buffer = (char *) realloc(local_buffer, (local_len + we_add_len) * sizeof(char));
+
+                    local_buffer[local_len] = buff;
+                    local_len++;
+
+                    read(in, &buff, 1);
+                }
+
+                (*buffer) = local_buffer;
+                return WORD;
+                break;
+            default:
+
+                while (buff != ' ' && buff != '\n' && buff != EOF) {
+
+                    if (buff == '|' || buff == '>' || buff == '&' || buff == ';' || buff == '<')
+                        break;
+
+                    if (local_len % we_add_len == 0)
+                        local_buffer = (char *) realloc(local_buffer, (local_len + we_add_len) * sizeof(char));
+
+                    local_buffer[local_len] = buff;
+                    local_len++;
+
+                    read(in, &buff, 1);
+                }
+
+                (*buffer) = local_buffer;
+                lseek(in, -1, SEEK_CUR);
+                return WORD;
+                break;
+        }
+    }
+}
+
 int mshell_getlex(char **buffer, int *status) {
     /* getting lexemes \ words */
 
@@ -271,12 +451,18 @@ int mshell_getlex(char **buffer, int *status) {
 
         buff = getchar();
 
+
         switch (buff) {
+
+            case '\033':
+
+                printf("BEEP\n");
+
+                break;
 
             case '|':
 
                 buff = getchar();
-
                 if (buff == '|')
                     return OR;
 
@@ -354,7 +540,7 @@ int mshell_getlex(char **buffer, int *status) {
                 break;
             case EOF:
                 status[6] = 1;
-                return EndFile;
+                return END;
                 break;
             case '#':
                 break;
@@ -445,7 +631,7 @@ struct command *mshell_build(int *status) {
         } else {
 
             buffer = NULL;
-            stat = mshell_getlex(&buffer, status);
+            stat = getlex_types[in_file](&buffer, status);
         }
 
         switch(stat) {
@@ -488,7 +674,7 @@ struct command *mshell_build(int *status) {
                 do {
                     buffer = NULL;
 
-                    new_stat = mshell_getlex(&buffer, status);
+                    new_stat = getlex_types[in_file](&buffer, status);
 
                     switch(new_stat) {
 
@@ -504,7 +690,7 @@ struct command *mshell_build(int *status) {
 
                             buffer = NULL;
 
-                            new_stat = mshell_getlex(&buffer, status);
+                            new_stat = getlex_types[in_file](&buffer, status);
 
                             if (new_stat != WORD) {
                                 exit_flag = 2;
@@ -520,7 +706,7 @@ struct command *mshell_build(int *status) {
 
                             buffer = NULL;
 
-                            new_stat = mshell_getlex(&buffer, status);
+                            new_stat = getlex_types[in_file](&buffer, status);
 
                             if (new_stat != WORD) {
                                 exit_flag = 2;
@@ -535,7 +721,7 @@ struct command *mshell_build(int *status) {
 
                             buffer = NULL;
 
-                            new_stat = mshell_getlex(&buffer, status);
+                            new_stat = getlex_types[in_file](&buffer, status);
 
                             if (new_stat != WORD) {
                                 exit_flag = 2;
@@ -613,7 +799,7 @@ struct command *mshell_build(int *status) {
                     in_flag = 1;
                     buffer = NULL;
 
-                    new_stat = mshell_getlex(&buffer, status);
+                    new_stat = getlex_types[in_file](&buffer, status);
 
                     if (new_stat != WORD) {
                         exit_flag = 2;
@@ -636,7 +822,7 @@ struct command *mshell_build(int *status) {
                     out_flag = 1;
                     buffer = NULL;
 
-                    new_stat = mshell_getlex(&buffer, status);
+                    new_stat = getlex_types[in_file](&buffer, status);
 
                     if (new_stat != WORD) {
                         exit_flag = 2;
@@ -660,7 +846,7 @@ struct command *mshell_build(int *status) {
                     append_flag = 1;
                     buffer = NULL;
 
-                    new_stat = mshell_getlex(&buffer, status);
+                    new_stat = getlex_types[in_file](&buffer, status);
 
                     if (new_stat != WORD) {
                         exit_flag = 2;
@@ -858,8 +1044,8 @@ int mshell_forks(struct command data, int *err) {
 
         do {
 
-            waitpid(pid, &stat, WUNTRACED);
-        } while (!WIFEXITED(stat) && !WIFSIGNALED(stat));
+                waitpid(pid, &stat, WUNTRACED);
+            } while (!WIFEXITED(stat) && !WIFSIGNALED(stat));
 
     }
 
@@ -1493,3 +1679,4 @@ void free_commands(struct command *data, int commands_amount) {
             free(current.data);
     }
 }
+
