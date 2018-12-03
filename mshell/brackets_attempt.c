@@ -15,8 +15,6 @@ int length_ideal = 0;
 int in;
 int in_file = 0;
 
-int when_entered;
-int restore;
 
 void redirect_in(char *path) {
 
@@ -435,7 +433,6 @@ int mshell_getlex_file(char **buffer, int *status) {
         }
     }
 }
-
 int mshell_getlex(char **buffer, int *status) {
     /* getting lexemes \ words */
 
@@ -444,6 +441,8 @@ int mshell_getlex(char **buffer, int *status) {
     int local_len = 0;
     int current_len = 0;
     (*buffer) = NULL;
+
+    char *for_save = (char *) malloc(PATH_MAX);
 
     int flag = 0;
 
@@ -971,7 +970,6 @@ struct command *mshell_build(int *status) {
     return data;
 
 }
-
 void mshell_background_help() {
     /* checking status of background programs*/
     int i;
@@ -1001,7 +999,6 @@ void mshell_background_help() {
     }
 
 }
-
 // forking new process
 int mshell_forks(struct command data, int *err) {
 
@@ -1206,8 +1203,6 @@ int and_execute(struct command *data, int *status) {
 
     flag_safe = open("status_and_or.txt", O_CREAT | O_TRUNC, 0777);
     close(flag_safe);
-
-    dup2(when_entered, 0);
 
     do {
 
