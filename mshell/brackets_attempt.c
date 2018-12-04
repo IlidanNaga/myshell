@@ -1106,8 +1106,20 @@ int mshell_forks(struct command data, int *err) {
 
                 waitpid(pid, &stat, WUNTRACED);
             } while (!WIFEXITED(stat) && !WIFSIGNALED(stat));
+            
+           if (WIFEXITED(stat)) {
+			   
+			   if (WEXITSTATUS(stat)) {
+					flag_safe = open("status_and_or.txt", O_CREAT | O_TRUNC | O_WRONLY, 0777); 
+					write(flag_safe, it_s_hold, 1);
+					close(flag_safe);
+				}
+			}
+			
+			   
+       }
 
-    }
+
 
     return 1;
 }
