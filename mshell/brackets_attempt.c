@@ -15,6 +15,9 @@ int length_ideal = 0;
 int in;
 int in_file = 0;
 
+char current_line[PATH_MAX];
+int numb;
+
 
 void redirect_in(char *path) {
 
@@ -49,6 +52,16 @@ struct command {
     int data_len;
     int status[OR_target + 1];
 };
+
+
+struct for_save {
+
+    char **data;
+    int amount;
+    int current;
+};
+
+struct for_save *saved = NULL;
 
 int background_pid[256] = {0};
 int background_amount = 0;
@@ -102,77 +115,50 @@ int main(int argc, char **argv) {
         allowed_to_print = 0;
     } else {
         allowed_to_print = 1;
-    }
 
-    /*
+        int pid = fork(), stat;
 
-    save_fd = open("system_useage_pidsave.txt", O_CREAT | O_RDONLY, 0777);
-    int successful_read = read(save_fd, &read_fd, sizeof(int));
+        if (pid) {
 
-    if (successful_read > 0) {
-        if (getppid() == read_fd)
-            allowed_to_print = 0;
-    } else {
-        allowed_to_print = 1;
-    }
+            do {
 
-    close(save_fd);
+                waitpid(pid, &stat, WUNTRACED);
+            } while (!WIFEXITED(stat) && !WIFSIGNALED(stat));
 
-    save_fd = open("system_useage_pidsave.txt", O_CREAT | O_WRONLY | O_TRUNC, 0777);
-    int writing = getpid();
-    write(save_fd, &writing, sizeof(int));
-    close(save_fd);
+            char arr[PATH_MAX];
+            int fd = open("asdf.txt", O_RDONLY);
 
-    */
+            arr[0] = '/';
+            arr[1] = 'h';
+            arr[2] = 'o';
+            arr[3] = 'm';
+            arr[4] = 'e';
+            arr[5] = '/';
+            read(fd, arr+6, PATH_MAX);
+            close(fd);
 
-    int pid = fork(), stat;
+            arr[strlen(arr) - 1] = ' ';
 
-    if (pid) {
+            int i;
 
-        do {
+            for (i = 0; i < strlen(arr) - 1; i++)
+                ideal[i] = arr[i];
 
-            waitpid(pid, &stat, WUNTRACED);
-        } while (!WIFEXITED(stat) && !WIFSIGNALED(stat));
-
-        char arr[PATH_MAX];
-        int fd = open("asdf.txt", O_RDONLY);
-
-        arr[0] = '/';
-        arr[1] = 'h';
-        arr[2] = 'o';
-        arr[3] = 'm';
-        arr[4] = 'e';
-        arr[5] = '/';
-        read(fd, arr+6, PATH_MAX);
-        close(fd);
-
-        arr[strlen(arr) - 1] = ' ';
-
-        int i;
-
-        for (i = 0; i < strlen(arr) - 1; i++)
-            ideal[i] = arr[i];
-
-        length_ideal = strlen(arr) - 1;
+            length_ideal = strlen(arr) - 1;
 
 
-    } else {
+        } else {
 
-        int fd = open("asdf.txt", O_CREAT | O_WRONLY | O_TRUNC, 0777);
-        dup2(fd, 1);
-        close(fd);
-        execlp("whoami", "whoami", NULL);
-        perror("exec");
+            int fd = open("asdf.txt", O_CREAT | O_WRONLY | O_TRUNC, 0777);
+            dup2(fd, 1);
+            close(fd);
+            execlp("whoami", "whoami", NULL);
+            perror("exec");
+        }
+
     }
 
     mshell_init();
-
-    /*
-
-    save_fd = open("system_useage_pidsave.txt", O_TRUNC);
-    close(save_fd);
-
-    */
 
     return 0;
 
@@ -185,6 +171,13 @@ void mshell_init(void) {
     struct command *data = NULL;
     int status[7] = {0, 0, 0, 0, 0, 0, 0};
     int flag;
+
+
+
+    saved = (struct for_save *) malloc(sizeof(struct for_save));
+    saved->amount = 0;
+    saved->current = 0;
+    saved->data = NULL;
 
     // status[0] is error trigger
     // status[1] is loop trigger
@@ -244,6 +237,16 @@ void mshell_init(void) {
         }
         */
 
+        saved->data = (char **) realloc(saved->data, (saved->amount + 1) * sizeof(char*));
+        saved->data[saved->amount] = (char *) malloc (numb * sizeof(char));
+        strncat(saved->data[saved->amount], current_line, numb);
+        saved->amount ++;
+        saved->current ++;
+
+        for (k = 0; k < numb; k ++)
+            current_line[k] = ' ';
+        numb = 0;
+
         if (!status[0]) {
             if (!status[4]) {
                 status[1] = and_execute(data, status);
@@ -284,12 +287,6 @@ int mshell_getlex_file(char **buffer, int *status) {
 
         switch (buff) {
 
-            case '\033':
-
-                printf("BEEP\n");
-
-                break;
-
             case '|':
 
                 read_no = read(in, &buff, 1);
@@ -333,6 +330,8 @@ int mshell_getlex_file(char **buffer, int *status) {
             case '(':
 
                 current_len = 0;
+                local_buffer = NULL;
+                flag = 1;
 
                 read_no = read(in, &buff, 1);
 
@@ -341,9 +340,15 @@ int mshell_getlex_file(char **buffer, int *status) {
                     return ERROR;
                 }
 
-                flag ++;
+                if (buff == ')')
+                    return ERROR;
 
-                while (flag) {
+
+                if (buff == '(')
+                    flag ++;
+
+
+                do {
 
                     if (buff == '\n')
                         return ERROR;
@@ -362,13 +367,12 @@ int mshell_getlex_file(char **buffer, int *status) {
                     if (buff == ')')
                         flag --;
 
-                }
+                } while (flag);
 
                 if (current_len % we_add_len == 0)
                     local_buffer = (char *) realloc(local_buffer, (current_len + 1) * sizeof(char));
 
                 local_buffer[current_len] = EOF;
-
 
                 (*buffer) = local_buffer;
                 return LP;
@@ -379,7 +383,7 @@ int mshell_getlex_file(char **buffer, int *status) {
                 break;
             case EOF:
                 status[6] = 1;
-                return EndFile;
+                return END;
                 break;
             case '#':
                 break;
@@ -426,6 +430,9 @@ int mshell_getlex_file(char **buffer, int *status) {
                     read(in, &buff, 1);
                 }
 
+                if (buff == EOF)
+                    status[6] = 1;
+
                 (*buffer) = local_buffer;
                 lseek(in, -1, SEEK_CUR);
                 return WORD;
@@ -442,34 +449,60 @@ int mshell_getlex(char **buffer, int *status) {
     int current_len = 0;
     (*buffer) = NULL;
 
-    char *for_save = (char *) malloc(PATH_MAX);
-
     int flag = 0;
 
     while(1) {
 
         buff = getchar();
+        current_line[numb] = buff;
+        numb++;
 
 
         switch (buff) {
 
             case '\033':
 
-                printf("BEEP\n");
+                numb --;
+                current_line[numb] = ' ';
+
+                buff = getchar();
+
+                if (buff == '[') {
+
+                    buff = getchar();
+
+                    switch (buff) {
+
+                        case 'A':
+
+
+
+                            break;
+
+                        default:
+
+                            return ERROR;
+                    }
+                }
 
                 break;
 
             case '|':
 
                 buff = getchar();
-                if (buff == '|')
+
+
+                if (buff == '|') {
+                    current_line[numb] = buff;
+                    numb++;
+
                     return OR;
+                }
 
                 ungetc(buff, stdin);
                 return PIPE;
             case ';':
-
-                return END;
+                return SC;
             case '<':
 
                 return IN;
@@ -477,18 +510,24 @@ int mshell_getlex(char **buffer, int *status) {
 
                 buff = getchar();
 
-                if (buff == '>')
+                if (buff == '>') {
+                    current_line[numb] = buff;
+                    numb++;
+
                     return ADD;
-                else {
+                } else {
                     ungetc(buff, stdin);
                     return OUT;
                 }
             case '&':
 
                 buff = getchar();
-                if (buff == '&')
+                if (buff == '&') {
+                    current_line[numb] = buff;
+                    numb++;
+
                     return AND;
-                else {
+                } else {
                     ungetc(buff, stdin);
                     return BACK;
                 }
@@ -496,8 +535,17 @@ int mshell_getlex(char **buffer, int *status) {
             case '(':
 
                 current_len = 0;
+                flag = 1;
+
                 buff = getchar();
-                flag ++;
+                current_line[numb] = buff;
+                numb++;
+
+                if (buff == '(')
+                    flag ++;
+
+                if (buff == ')')
+                    return ERROR;
 
                 while (flag) {
 
@@ -516,6 +564,8 @@ int mshell_getlex(char **buffer, int *status) {
                     current_len ++;
 
                     buff = getchar();
+                    current_line[numb] = buff;
+                    numb++;
 
                     if (buff == '(')
                         flag ++;
@@ -529,7 +579,6 @@ int mshell_getlex(char **buffer, int *status) {
 
                 local_buffer[current_len] = EOF;
 
-
                 (*buffer) = local_buffer;
                 return LP;
 
@@ -538,6 +587,10 @@ int mshell_getlex(char **buffer, int *status) {
                 return RP;   // later implement a dead-end if we meet a RP
                 break;
             case EOF:
+
+                numb --;
+                current_line[numb] = ' ';
+
                 status[6] = 1;
                 return END;
                 break;
@@ -546,12 +599,15 @@ int mshell_getlex(char **buffer, int *status) {
             case ' ':
                 break;
             case '\n':
-
+                numb --;
+                current_line[numb] = ' ';
                 return END;
                 break;
             case '"':
 
                 buff = getchar();
+                current_line[numb] = buff;
+                numb++;
 
                 while (buff != '"') {
 
@@ -565,6 +621,8 @@ int mshell_getlex(char **buffer, int *status) {
                     local_len++;
 
                     buff = getchar();
+                    current_line[numb] = buff;
+                    numb++;
                 }
 
                 (*buffer) = local_buffer;
@@ -584,10 +642,14 @@ int mshell_getlex(char **buffer, int *status) {
                     local_len++;
 
                     buff = getchar();
+                    current_line[numb] = buff;
+                    numb++;
                 }
 
                 (*buffer) = local_buffer;
                 ungetc(buff, stdin);
+                numb --;
+                current_line[numb] = ' ';
                 return WORD;
                 break;
         }
@@ -967,6 +1029,7 @@ struct command *mshell_build(int *status) {
         status[0] = 1;
 
     status[2] = commands_amount;
+
     return data;
 
 }
@@ -1116,7 +1179,6 @@ int mshell_help(struct command data, int *err) {
 
     return 1;
 }
-
 //transporter
 void mshell_conv(struct command *data, int length, int*err) {
 
@@ -1143,22 +1205,36 @@ void mshell_conv(struct command *data, int length, int*err) {
             if (data[i].status[ADD])
                 redirect_append(data[i].relocate_append);
 
-
             if (i + 1 != length) {
 
                 dup2(fd[1], 1);
             }
+
             close(fd[1]);
             close(fd[0]);
 
-            execvp(data[i].data[0], data[i].data);
+            if (data[i].status[LP]) {
 
-            flag_safe = open("status_and_or.txt", O_CREAT | O_TRUNC | O_WRONLY, 0777);
-            write(flag_safe, it_s_hold, 1);
-            close(flag_safe);
+                int fd = open("system_useage_file.txt", O_CREAT | O_WRONLY | O_TRUNC, 0777);
+                write(fd, data[i].brackets, strlen(data[i].brackets));
+                close(fd);
 
-            perror("Transporter - exec");
-            exit(EXIT_FAILURE);
+                execlp("/home/ilidannaga/CLionProjects/myshell/mshell/./shell", "/home/ilidannaga/CLionProjects/myshell/mshell/./shell", "system_useage_file.txt", NULL);
+                perror("brackets - exec");
+
+                exit(EXIT_FAILURE);
+
+            } else {
+
+                execvp(data[i].data[0], data[i].data);
+
+                flag_safe = open("status_and_or.txt", O_CREAT | O_TRUNC | O_WRONLY, 0777);
+                write(flag_safe, it_s_hold, 1);
+                close(flag_safe);
+
+                perror("Transporter - exec");
+                exit(EXIT_FAILURE);
+            }
         }
         dup2(fd[0],0);
         close(fd[1]);
@@ -1287,7 +1363,7 @@ int and_execute(struct command *data, int *status) {
                 pid = fork();
 
                 if (pid == 0) {
-                    execlp("./shell", "./shell", "system_useage_file.txt", NULL);
+                    execlp("/home/ilidannaga/CLionProjects/myshell/mshell/./shell", "/home/ilidannaga/CLionProjects/myshell/mshell/./shell", "system_useage_file.txt", NULL);
                     perror("brackets - exec");
 
                     exit(EXIT_FAILURE);
