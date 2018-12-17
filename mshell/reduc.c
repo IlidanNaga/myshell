@@ -9,10 +9,9 @@
 #include <sys/types.h>
 #include <limits.h>
 
-int allowed_to_print = 0;
-char ideal[PATH_MAX];
-int length_ideal = 0;
-int in;
+char str[PATH_MAX];
+int stringlen = 0;
+int used = 0;
 
 void redirect_in(char *path) {
 
@@ -34,7 +33,7 @@ void redirect_append(char *path) {
     close(fd);
 }
 
-enum lexemes {NUL, SC, IN, OUT, ADD, PIPE, OR, BACK, AND, LP, RP, END, ERROR, WORD, EndFile, LP_inside, RP_inside, AND_target, OR_target};
+enum lexemes {NUL, SC, IN, OUT, ADD, PIPE, OR, BACK, AND, LP, RP, END, ERROR, WORD, EndFile, AND_target, OR_target};
 #define enum_amount OR_target
 
 struct command {
@@ -52,7 +51,6 @@ struct command {
 struct for_save *saved = NULL;
 
 int background_pid[256] = {0};
-int background_amount = 0;
 
 void mshell_init(void);                              // function which makes everything work
 int mshell_getlex(char **buffer, int * status);      // returning lexeme type, in **buffer - string of inner data
@@ -61,10 +59,6 @@ int mshell_getlex(char **buffer, int * status);      // returning lexeme type, i
 int mshell_forks(struct command data, int *err);                       // working with data - fork way
 void mshell_background_help();                       // function used 4 printing status of programs
 
-int mshell_cd(struct command data, int *err);                          // working with data - got cd
-int mshell_exit(struct command data, int *err);                        // working with data - got exit
-int mshell_help(struct command data, int *err);                        // printing all builtins i made
-int mshell_builtins_am();                            // returning amount of builtin functions we realise
 
 struct command *mshell_build(int *status);
 void mshell_conv(struct command *data, int length, int *err);
@@ -77,68 +71,21 @@ void background_execute(struct command *data, int *status);
 int mshell_back_forks(struct command data, int *err);
 void mshell_back_conv(struct command *data, int length, int*err);
 
-char *builtin_str[] = {
-        "cd", "exit","help"
-};
-int (*builtin_func[]) (struct command, int *) = {
-        &mshell_cd, &mshell_exit, &mshell_help
-};
-
 
 // "main" - literaly does nothing, just redirects input if we get file in
 int main(int argc, char **argv) {
 
     signal(SIGINT, SIG_IGN);
 
-    if (argc >= 2) {
-        in = open(argv[1], O_RDONLY);
-        dup2(in, 0);
-        allowed_to_print = 0;
+    if (argc == 2) {
+        memmove(str, argv[1], strlen(argv[1]));
+        //puts(str);
+        stringlen = strlen(argv[1]);
+
     } else {
-        allowed_to_print = 1;
-
-        int pid = fork(), stat;
-
-        if (pid) {
-
-            do {
-
-                waitpid(pid, &stat, WUNTRACED);
-            } while (!WIFEXITED(stat) && !WIFSIGNALED(stat));
-
-            char arr[PATH_MAX];
-            int fd = open("asdf.txt", O_RDONLY);
-
-            arr[0] = '/';
-            arr[1] = 'h';
-            arr[2] = 'o';
-            arr[3] = 'm';
-            arr[4] = 'e';
-            arr[5] = '/';
-            read(fd, arr+6, PATH_MAX);
-            close(fd);
-
-            arr[strlen(arr) - 1] = ' ';
-
-            int i;
-
-            for (i = 0; i < strlen(arr) - 1; i++)
-                ideal[i] = arr[i];
-
-            length_ideal = strlen(arr) - 1;
-
-
-        } else {
-
-            int fd = open("asdf.txt", O_CREAT | O_WRONLY | O_TRUNC, 0777);
-            dup2(fd, 1);
-            close(fd);
-            execlp("whoami", "whoami", NULL);
-            perror("exec");
-        }
-
+        printf("Please, try again with writing data\n");
+        return 0;
     }
-
     mshell_init();
 
     return 0;
@@ -151,7 +98,6 @@ void mshell_init(void) {
 
     struct command *data = NULL;
     int status[7] = {0, 0, 0, 0, 0, 0, 0};
-    int flag;
 
     // status[0] is error trigger
     // status[1] is loop trigger
@@ -162,69 +108,26 @@ void mshell_init(void) {
     // status[5] is brackets trigger (dunno if we have 2 use)
     // status[6] is EOF trigger - used to exit the fucking shell;
 
-    do {
+    int k;
 
-        int k;
+    for (k = 0; k < 6; k++)
+        status[k] = 0;
 
-        for (k = 0; k < 6; k++)
-            status[k] = 0;
+    data = mshell_build(status);
 
-        if (allowed_to_print) {
-
-            char path[PATH_MAX];
-
-            getcwd(path, PATH_MAX);
-
-            flag = 1;
-
-            for (k = 0; k < length_ideal; k++) {
-                if (path[k] != ideal[k])
-                    flag = 0;
-            }
-
-            if (!flag) {
-                printf("%s$ ", path);
-            } else {
-                char path1[PATH_MAX];
-                path1[0] = '~';
-
-                for (k = 1; k < PATH_MAX - length_ideal; k++)
-                    path1[k] = path[length_ideal - 1 + k];
-
-                printf("%s$ ", path1);
-            }
-
-        }
-
-        data = mshell_build(status);
-        /*
-        int i, j;
-
-        printf("commands amount %d\n", status[2]);
-
-        for (i = 0; i < status[2]; i++) {
-            printf("Words amount in command %d\n", data[i].data_len);
-            if (data[i].status[BACK])
-                printf("BEEP %d\n", i);
-            for (j = 0; j < data[i].data_len - 1; j++)
-                puts(data[i].data[j]);
-        }
-        */
-
-        if (!status[0]) {
-            if (!status[4]) {
-                status[1] = and_execute(data, status);
-            } else {
-                status[1] = 1;
-                background_execute(data, status);
-            }
-        } else
+    if (!status[0]) {
+        if (!status[4]) {
+            status[1] = and_execute(data, status);
+        } else {
             status[1] = 1;
+            background_execute(data, status);
+        }
+    } else
+        printf("Parsing error\n");
 
-        data = NULL;
+    data = NULL;
 
-        mshell_background_help();
-    } while (status[1]  && !status[6]);
+    mshell_background_help();
 
 }
 
@@ -234,28 +137,34 @@ int mshell_getlex(char **buffer, int *status) {
     char buff;
     char *local_buffer = NULL;
     int local_len = 0;
-    int current_len = 0;
     (*buffer) = NULL;
 
     int flag = 0;
 
     while(1) {
 
-        buff = getchar();
+
+        if (used > stringlen)
+            return END;
+
+        buff = str[used];
+        used ++;
+
+        //printf("%c, %d\n", buff, used);
 
         switch (buff) {
 
             case '|':
 
-                buff = getchar();
-
+                buff = str[used];
+                used ++;
 
                 if (buff == '|') {
 
                     return OR;
                 }
 
-                ungetc(buff, stdin);
+                used --;
                 return PIPE;
             case ';':
                 return SC;
@@ -264,23 +173,26 @@ int mshell_getlex(char **buffer, int *status) {
                 return IN;
             case '>':
 
-                buff = getchar();
+                buff = str[used];
+                used ++;
 
                 if (buff == '>') {
 
                     return ADD;
                 } else {
-                    ungetc(buff, stdin);
+                    used --;
                     return OUT;
                 }
             case '&':
 
-                buff = getchar();
+                buff = str[used];
+                used ++;
+
                 if (buff == '&') {
 
                     return AND;
                 } else {
-                    ungetc(buff, stdin);
+                    used --;
                     return BACK;
                 }
                 break;
@@ -302,7 +214,8 @@ int mshell_getlex(char **buffer, int *status) {
                 break;
             case '"':
 
-                buff = getchar();
+                buff = str[used];
+                used ++;
 
                 while (buff != '"') {
 
@@ -315,7 +228,8 @@ int mshell_getlex(char **buffer, int *status) {
                     local_buffer[local_len] = buff;
                     local_len++;
 
-                    buff = getchar();
+                    buff = str[used];
+                    used ++;
                 }
 
                 (*buffer) = local_buffer;
@@ -334,12 +248,16 @@ int mshell_getlex(char **buffer, int *status) {
                     local_buffer[local_len] = buff;
                     local_len++;
 
-                    buff = getchar();
+                    if (used > stringlen)
+                        break;
 
+                    buff = str[used];
+                    used ++;
+
+                    //printf("%c, here %d\n", buff, used);
                 }
 
                 (*buffer) = local_buffer;
-                ungetc(buff, stdin);
 
                 return WORD;
                 break;
@@ -782,73 +700,6 @@ int mshell_forks(struct command data, int *err) {
     return 1;
 }
 // builtins - related functions
-int mshell_builtins_am() {
-
-    return sizeof(builtin_str) / sizeof(char *);
-}
-int mshell_cd(struct command data, int *err) {
-
-    int flag_safe;
-    char it_s_hold[2] = {'1', '1'};
-
-    if (data.data[1] == NULL) {
-
-        data.data[1] = ideal;
-
-        if (chdir(data.data[1]) != 0) {
-            flag_safe = open("status_and_or.txt", O_CREAT | O_TRUNC | O_WRONLY, 0777);
-            write(flag_safe, it_s_hold, 1);
-            close(flag_safe);
-            perror("mshell - cd");
-        }
-    } else {
-
-        if (data.data[1][0] == '~') {
-
-            char buffer[PATH_MAX];
-            int i;
-
-            for (i = 0; i < length_ideal; i++) {
-                buffer[i] = ideal[i];
-            }
-
-            for (i = 1; i <= strlen(data.data[1]); i++) {
-                buffer[length_ideal - 1 + i] = data.data[1][i];
-            }
-
-            free(data.data[1]);
-            data.data[1] = buffer;
-
-        }
-
-        if (chdir(data.data[1]) != 0) {
-            flag_safe = open("status_and_or.txt", O_CREAT | O_TRUNC | O_WRONLY, 0777);
-            write(flag_safe, it_s_hold, 1);
-            close(flag_safe);
-            perror("mshell - cd");
-        }
-    }
-
-
-    return 1;
-}
-int mshell_exit(struct command data, int *err) {
-    return 0;
-}
-int mshell_help(struct command data, int *err) {
-    /* printing all background data */
-
-    int i;
-
-    printf("Hello, these are all the builtins already realised\n");
-
-    for (i = 0; i < sizeof(builtin_str) / sizeof(char *); i++)
-        printf("%s  ", builtin_str[i]);
-
-    printf("\n");
-
-    return 1;
-}
 //transporter
 void mshell_conv(struct command *data, int length, int*err) {
 
@@ -922,14 +773,12 @@ int and_execute(struct command *data, int *status) {
     int builtin_flag;
     struct command current;
 
-    int and_flag = 0, and_succes;
-    int or_flag = 0, or_succes;
+    int and_succes, or_succes;
     int execution_failed = 0;
 
     struct command *transporter = NULL;
     int pipe_len;
     int whynot;
-    int pid, stat;
     char it_s_for_flag[2];
     int flag_safe;
     int successful_read;
@@ -982,11 +831,9 @@ int and_execute(struct command *data, int *status) {
                 while ((iter < status[2]) && whynot) {
 
                     if (data[iter].status[AND]) {
-                        and_flag = 1;
                         whynot = 0;
                     }
                     if (data[iter].status[OR]) {
-                        or_flag = 1;
                         whynot = 0;
                     }
 
@@ -1013,16 +860,8 @@ int and_execute(struct command *data, int *status) {
                 free(transporter);
             } else {
 
-                builtin_flag = 0;
-                for (j = 0; j < mshell_builtins_am(); j++) {
-                    if (strcmp(current.data[0], builtin_str[j]) == 0) {
-                        we_exit = (*builtin_func[j])(current, &execution_failed);
-                        builtin_flag = 1;
-                    }
-                }
 
-                if (!builtin_flag)
-                    we_exit = mshell_forks(current, &execution_failed);
+                we_exit = mshell_forks(current, &execution_failed);
 
             }
         } else {
@@ -1043,13 +882,12 @@ int and_execute(struct command *data, int *status) {
 
 //background implementation
 void background_execute(struct command *data, int *status) {
+
     //we have a structure with:
     //set of lines char **data
     //lines amount (dunno 4 what, but whynot)
     //int status[OR_target] - tells what was used on it, OR_target - the last enumerate we used
     //status[2] - total amount of commands we have
-
-
     int fd_hold = dup(0);
 
     int fd = open("/dev/null", O_RDONLY);
@@ -1058,14 +896,12 @@ void background_execute(struct command *data, int *status) {
 
     signal(SIGINT, SIG_IGN);
 
-    int iter = 0, j;
+    int iter = 0;
     int we_exit = 1;
 
-    int builtin_flag;
     struct command current;
 
-    int and_flag = 0, and_succes;
-    int or_flag = 0, or_succes;
+    int and_succes, or_succes;
     int execution_failed = 0;
 
     struct command *transporter = NULL;
@@ -1076,13 +912,10 @@ void background_execute(struct command *data, int *status) {
     int successful_read;
     char it_s_for_flag[2];
 
-    int pid, stat;
-
 
     do {
 
-        and_flag = 0;
-        or_flag = 0;
+
         and_succes = 0;
         or_succes = 0;
         current = data[iter];
@@ -1111,11 +944,7 @@ void background_execute(struct command *data, int *status) {
             or_succes = execution_failed;
         }
 
-        if (current.status[AND])
-            and_flag = 1;
 
-        if (current.status[OR])
-            or_flag = 1;
 
         if ((current.status[AND_target] && and_succes) || (current.status[OR_target] && or_succes) ||
             (!current.status[AND_target] && !current.status[OR_target])) {
@@ -1131,11 +960,9 @@ void background_execute(struct command *data, int *status) {
                 while ((iter < status[2]) && whynot) {
 
                     if (data[iter].status[AND]) {
-                        and_flag = 1;
                         whynot = 0;
                     }
                     if (data[iter].status[OR]) {
-                        or_flag = 1;
                         whynot = 0;
                     }
 
@@ -1162,15 +989,7 @@ void background_execute(struct command *data, int *status) {
                 free(transporter);
             } else {
 
-                builtin_flag = 0;
-                for (j = 0; j < mshell_builtins_am(); j++) {
-                    if (strcmp(current.data[0], builtin_str[j]) == 0) {
-                        builtin_flag = 1;
-                    }
-                }
-
-                if (!builtin_flag)
-                    we_exit = mshell_back_forks(current, &execution_failed);
+                we_exit = mshell_back_forks(current, &execution_failed);
 
             }
         } else {
